@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { importSpecBundle } from "./pact-spec-importer"
+import { importInstructionSpec, importSpecBundle } from "./pact-spec-importer"
 
 const tempDirs: string[] = []
 const cpythonTrialBundleRoot =
@@ -523,6 +523,59 @@ describe("PACT spec importer", () => {
       imported_groups: 4,
       imported_tasks: 6,
     })
+  })
+
+  test("deterministically imports a Harbor instruction without reading verifier files", () => {
+    const projectRoot = tempDir("pact-harbor-project-")
+    const instructionFile = join(projectRoot, "instruction.md")
+    const outputLoopDir = join(projectRoot, ".pact", "loops", "harbor-case")
+    writeFileSync(
+      instructionFile,
+      `# Task
+Fix cache invalidation for renamed entries.
+
+## Requirements
+- Preserve existing public APIs.
+- Invalidate both the old and new cache keys after a rename.
+- Return the existing error type when the source entry is missing.
+
+## Verification
+- Run the repository's focused cache tests.
+`,
+      "utf-8",
+    )
+
+    importInstructionSpec({
+      instructionFile,
+      outputLoopDir,
+      projectRoot,
+      planFile: instructionFile,
+      loopID: "harbor-case",
+      maxRounds: 3,
+      reviewerBackend: "opencode-cli",
+      reviewerModel: "openrouter/z-ai/glm-5.2",
+      workerModel: "openrouter/z-ai/glm-5.2",
+      now: new Date("2026-07-15T00:00:00.000Z"),
+    })
+
+    const state = JSON.parse(readFileSync(join(outputLoopDir, "state.json"), "utf-8"))
+    expect(state).toMatchObject({
+      planner_backend: "spec-import",
+      planner_model: null,
+      max_rounds: 3,
+      reviewer_backend: "opencode-cli",
+      reviewer_model: "openrouter/z-ai/glm-5.2",
+      worker_model: "openrouter/z-ai/glm-5.2",
+    })
+    const plan = readFileSync(join(outputLoopDir, "plan.md"), "utf-8")
+    expect(plan).toContain("Invalidate both the old and new cache keys")
+    expect(plan).toContain("Preserve existing public APIs")
+    expect(plan).not.toContain("tests/config.json")
+    const manifest = JSON.parse(readFileSync(join(outputLoopDir, "spec-input-manifest.json"), "utf-8"))
+    expect(manifest.artifact_generation_strategy).toBe("instruction-markdown-v1")
+    const round0 = JSON.parse(readFileSync(join(outputLoopDir, "round-00-result.json"), "utf-8"))
+    expect(round0.metrics.imported_groups).toBeGreaterThanOrEqual(3)
+    expect(round0.metrics.imported_tasks).toBeGreaterThanOrEqual(3)
   })
 
   allCpythonBundlesTest("generates round0 resume sources for all CPython markdown section bundles", () => {

@@ -2508,7 +2508,6 @@ export function cliArgs(raw: string[]): {
   reviewerBackend?: ReviewerBackend
   reviewerModel?: string
   reviewerEffort?: ModelReasoningEffort
-  reviewerAgent?: string
   fullAlignmentInterval?: number
   sessionStrategy?: SessionStrategy
   verificationCommand?: string
@@ -2551,7 +2550,6 @@ export function cliArgs(raw: string[]): {
     reviewerBackend: parseReviewerBackend(parsed["reviewer-backend"] ?? parsed.reviewer),
     reviewerModel: parsed["reviewer-model"],
     reviewerEffort: parseModelReasoningEffort(parsed["reviewer-effort"]),
-    reviewerAgent: parsed["reviewer-agent"],
     verificationCommand: defaultVerificationCommand(parsed),
     verificationTimeoutMs: parsed["verification-timeout-ms"] ? Number(parsed["verification-timeout-ms"]) : undefined,
     resumeLoopDir: parsed["resume-loop"] ?? env.PACT_RESUME_LOOP_DIR,

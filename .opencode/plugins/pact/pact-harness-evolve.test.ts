@@ -6,6 +6,7 @@ import { join } from "node:path"
 import {
   compareHarnessVariants,
   evaluateHarnessChanges,
+  harnessCaseResultFromHarborTrial,
   harnessCaseResultFromLolbenchCsv,
   harnessEvolveCliArgs,
   loadHarnessSuite,
@@ -87,23 +88,45 @@ describe("PACT harness evolution", () => {
     })
   })
 
-  test("loads the checked-in LoLBench mini-suite", () => {
-    const suite = loadHarnessSuite(join(process.cwd(), "pact-harness", "suites", "lolbench-mini-suite.json"))
+  test("loads a SWE-bench Pro Harbor suite without a LoLBench resume directory", () => {
+    const root = tempDir()
+    const taskPath = join(root, "instance-example")
+    mkdirSync(taskPath, { recursive: true })
+    const suitePath = join(root, "suite.json")
+    writeFileSync(
+      suitePath,
+      JSON.stringify({
+        name: "swepro-evolution",
+        benchmark: "swebench-pro-harbor",
+        max_rounds: 3,
+        cases: [
+          {
+            id: "example-case",
+            instance_id: "instance_example__repo-abc",
+            task_path: taskPath,
+            language: "Python",
+            tags: ["python"],
+          },
+        ],
+      }),
+      "utf-8",
+    )
 
-    expect(suite.cases.length).toBeGreaterThan(0)
-    expect(suite.cases[0]?.resume_loop_dir).toContain("lolbench_pact_round0_imports")
-  })
-
-  test("loads the checked-in PEP615/646/680 suite", () => {
-    const suite = loadHarnessSuite(join(process.cwd(), "pact-harness", "suites", "lolbench-pep615-646-680.json"))
-
-    expect(suite.cases.map((caseItem) => caseItem.id)).toEqual([
-      "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
-      "CPython_PEP-646_Variadic-Generics_PR-31018",
-      "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498",
-    ])
-    expect(suite.cases.every((caseItem) => existsSync(caseItem.resume_loop_dir))).toBe(true)
-    expect(suite.cases.every((caseItem) => caseItem.target_suites?.includes("orig"))).toBe(true)
+    expect(loadHarnessSuite(suitePath)).toEqual({
+      name: "swepro-evolution",
+      benchmark: "swebench-pro-harbor",
+      max_rounds: 3,
+      cases: [
+        {
+          id: "example-case",
+          instance_id: "instance_example__repo-abc",
+          task_path: taskPath,
+          language: "Python",
+          max_rounds: 3,
+          tags: ["python"],
+        },
+      ],
+    })
   })
 
   test("guarded selection promotes a better non-regressing candidate", () => {
@@ -466,5 +489,60 @@ describe("PACT harness evolution", () => {
       verification_status: "infra_failed",
       infra_error: "docker build failed",
     })
+  })
+
+  test("normalizes Harbor reward and PACT state into a harness case result", () => {
+    const result = harnessCaseResultFromHarborTrial(
+      {
+        started_at: "2026-07-15T00:00:00.000Z",
+        finished_at: "2026-07-15T00:03:00.000Z",
+        verifier_result: { rewards: { reward: 1 } },
+      },
+      {
+        caseId: "example-case",
+        artifactsDir: "/tmp/trial",
+        pactState: {
+          stop_reason: "reviewer_complete",
+          attempted_worker_rounds: 2,
+          completed_worker_rounds: 2,
+          reviewed_worker_rounds: 2,
+        },
+        patchText: "diff --git a/a.ts b/a.ts\n+fixed\n",
+      },
+    )
+
+    expect(result).toMatchObject({
+      case_id: "example-case",
+      status: "pass",
+      resolved: true,
+      reward: 1,
+      verification_status: "passed",
+      final_hidden_gate: "passed",
+      round_count: 2,
+      attempted_rounds: 2,
+      completed_rounds: 2,
+      reviewed_rounds: 2,
+      patch_quality: "valid",
+      patch_lines: 1,
+      agent_seconds: 180,
+      artifacts_dir: "/tmp/trial",
+    })
+  })
+
+  test("classifies Harbor timeout exceptions as timeout rather than a model failure", () => {
+    const result = harnessCaseResultFromHarborTrial(
+      {
+        verifier_result: { rewards: { reward: 0 } },
+        exception_info: {
+          exception_type: "TimeoutError",
+          exception_message: "agent execution timed out",
+        },
+      },
+      { caseId: "timeout-case" },
+    )
+
+    expect(result.status).toBe("timeout")
+    expect(result.timeout).toBe(true)
+    expect(result.resolved).toBe(false)
   })
 })

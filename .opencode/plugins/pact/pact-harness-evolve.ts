@@ -6,10 +6,15 @@ import { loadPactHarness, writeJsonFile } from "./pact-core"
 
 export type HarnessPromotionPolicy = "guarded" | "report-only" | "aggressive"
 export type HarnessVariantKind = "pact-harness" | "humanize-opencode"
+export type HarnessBenchmark = "lolbench" | "swebench-pro-harbor"
 
 export type HarnessSuiteCase = {
   id: string
-  resume_loop_dir: string
+  resume_loop_dir?: string
+  instance_id?: string
+  task_path?: string
+  language?: string
+  repo?: string
   max_rounds: number
   verification_command?: string
   target_suites?: string[]
@@ -17,6 +22,9 @@ export type HarnessSuiteCase = {
 }
 
 export type HarnessSuite = {
+  name?: string
+  benchmark?: HarnessBenchmark
+  max_rounds?: number
   cases: HarnessSuiteCase[]
 }
 
@@ -32,6 +40,14 @@ export type HarnessCaseResult = {
   patch_quality?: "valid" | "empty" | "malformed" | "unknown" | string
   artifacts_dir?: string
   infra_error?: string
+  reward?: number
+  agent_seconds?: number
+  patch_lines?: number
+  attempted_rounds?: number
+  completed_rounds?: number
+  reviewed_rounds?: number
+  reviewer_decision?: string
+  verifier_status?: string
 }
 
 export type HarnessVariantResults = {
@@ -155,9 +171,20 @@ export function validateHarnessSuite(value: unknown): HarnessSuite {
   if (!value || typeof value !== "object" || !Array.isArray((value as { cases?: unknown }).cases)) {
     throw new Error("PACT harness suite must include cases")
   }
-  const cases = (value as { cases: unknown[] }).cases.map((entry, index) => validateHarnessSuiteCase(entry, index))
+  const record = value as Record<string, unknown> & { cases: unknown[] }
+  const benchmark = record.benchmark === undefined ? undefined : validateHarnessBenchmark(record.benchmark)
+  const maxRounds = positiveNumber(record.max_rounds)
+  const cases = record.cases.map((entry, index) => validateHarnessSuiteCase(entry, index, benchmark, maxRounds))
   if (cases.length === 0) throw new Error("PACT harness suite must include at least one case")
-  return { cases }
+  if (record.name !== undefined && (typeof record.name !== "string" || !record.name)) {
+    throw new Error("PACT harness suite name must be a non-empty string")
+  }
+  return {
+    ...(record.name ? { name: record.name as string } : {}),
+    ...(benchmark ? { benchmark } : {}),
+    ...(maxRounds ? { max_rounds: maxRounds } : {}),
+    cases,
+  }
 }
 
 export function summarizeHarnessVariant(results: HarnessVariantResults): HarnessScoreSummary {
@@ -390,6 +417,63 @@ export function harnessCaseResultFromLolbenchCsv(
   }
 }
 
+export function harnessCaseResultFromHarborTrial(
+  trialResult: unknown,
+  input: {
+    caseId: string
+    artifactsDir?: string
+    pactState?: Record<string, unknown>
+    patchText?: string
+  },
+): HarnessCaseResult {
+  const trial = asRecord(typeof trialResult === "string" ? JSON.parse(trialResult) : trialResult)
+  const verifierResult = asRecord(trial.verifier_result)
+  const rewards = asRecord(verifierResult.rewards)
+  const rewardValues = Object.values(rewards).filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+  const reward = typeof rewards.reward === "number" ? rewards.reward : rewardValues.length ? Math.min(...rewardValues) : 0
+  const exception = asRecord(trial.exception_info)
+  const exceptionText = `${stringField(exception, "exception_type") ?? ""} ${stringField(exception, "exception_message") ?? ""}`.trim()
+  const timeout = /timeout|timed out/i.test(exceptionText)
+  const hasException = Object.keys(exception).length > 0
+  const resolved = reward >= 1 && !hasException
+  const status: HarnessCaseResult["status"] = timeout ? "timeout" : hasException ? "infra" : resolved ? "pass" : "fail"
+  const state = input.pactState ?? {}
+  const attempted = numericRecordField(state, "attempted_worker_rounds")
+  const completed = numericRecordField(state, "completed_worker_rounds")
+  const reviewed = numericRecordField(state, "reviewed_worker_rounds")
+  const patchText = input.patchText ?? ""
+  const patchLines = patchText
+    ? patchText.split(/\r?\n/).filter((line) => /^\+(?!\+\+)/.test(line)).length
+    : 0
+  const agentExecution = asRecord(trial.agent_execution)
+  const agentSeconds = elapsedSeconds(
+    stringField(agentExecution, "started_at") ?? stringField(trial, "started_at"),
+    stringField(agentExecution, "finished_at") ?? stringField(trial, "finished_at"),
+  )
+
+  return {
+    case_id: input.caseId,
+    status,
+    resolved,
+    reward,
+    stop_reason: stringField(state, "stop_reason") ?? (hasException ? exceptionText : resolved ? "harbor_resolved" : "harbor_unresolved"),
+    round_count: reviewed ?? completed ?? attempted,
+    attempted_rounds: attempted,
+    completed_rounds: completed,
+    reviewed_rounds: reviewed,
+    reviewer_decision: stringField(state, "last_review_decision") ?? stringField(state, "last_review_marker"),
+    verification_status: resolved ? "passed" : timeout ? "timeout" : hasException ? "infra_failed" : "failed",
+    final_hidden_gate: resolved ? "passed" : timeout ? "timeout" : "failed",
+    verifier_status: resolved ? "passed" : "failed",
+    timeout,
+    patch_quality: patchText ? (patchLines > 0 ? "valid" : "malformed") : "empty",
+    patch_lines: patchLines,
+    agent_seconds: agentSeconds,
+    artifacts_dir: input.artifactsDir,
+    infra_error: hasException && !timeout ? exceptionText || "Harbor trial failed" : undefined,
+  }
+}
+
 export async function runHarnessEvolution(input: {
   suite: HarnessSuite | string
   baselineHarnessDir: string
@@ -531,15 +615,31 @@ export function harnessEvolveCliArgs(raw: string[]): {
   }
 }
 
-function validateHarnessSuiteCase(value: unknown, index: number): HarnessSuiteCase {
+function validateHarnessSuiteCase(
+  value: unknown,
+  index: number,
+  benchmark?: HarnessBenchmark,
+  defaultMaxRounds?: number,
+): HarnessSuiteCase {
   if (!value || typeof value !== "object") throw new Error(`PACT harness suite case ${index} must be an object`)
   const record = value as Record<string, unknown>
   if (typeof record.id !== "string" || !record.id) throw new Error(`PACT harness suite case ${index} missing id`)
-  if (typeof record.resume_loop_dir !== "string" || !record.resume_loop_dir) {
-    throw new Error(`PACT harness suite case ${record.id} missing resume_loop_dir`)
-  }
-  if (typeof record.max_rounds !== "number" || !Number.isFinite(record.max_rounds) || record.max_rounds < 1) {
+  const maxRounds = positiveNumber(record.max_rounds) ?? defaultMaxRounds
+  if (!maxRounds) {
     throw new Error(`PACT harness suite case ${record.id} missing positive max_rounds`)
+  }
+  if (benchmark === "swebench-pro-harbor") {
+    if (typeof record.instance_id !== "string" || !record.instance_id) {
+      throw new Error(`PACT harness suite case ${record.id} missing instance_id`)
+    }
+    if (typeof record.task_path !== "string" || !record.task_path) {
+      throw new Error(`PACT harness suite case ${record.id} missing task_path`)
+    }
+    if (record.language !== undefined && typeof record.language !== "string") {
+      throw new Error(`PACT harness suite case ${record.id} has invalid language`)
+    }
+  } else if (typeof record.resume_loop_dir !== "string" || !record.resume_loop_dir) {
+    throw new Error(`PACT harness suite case ${record.id} missing resume_loop_dir`)
   }
   if (record.verification_command !== undefined && typeof record.verification_command !== "string") {
     throw new Error(`PACT harness suite case ${record.id} has invalid verification_command`)
@@ -555,12 +655,26 @@ function validateHarnessSuiteCase(value: unknown, index: number): HarnessSuiteCa
   }
   return {
     id: record.id,
-    resume_loop_dir: record.resume_loop_dir,
-    max_rounds: record.max_rounds,
+    resume_loop_dir: record.resume_loop_dir as string | undefined,
+    instance_id: record.instance_id as string | undefined,
+    task_path: record.task_path as string | undefined,
+    language: record.language as string | undefined,
+    repo: record.repo as string | undefined,
+    max_rounds: maxRounds,
     verification_command: record.verification_command,
     target_suites: record.target_suites,
     tags: record.tags,
   }
+}
+
+function validateHarnessBenchmark(value: unknown): HarnessBenchmark {
+  if (value === "ScaleAI/SWE-bench_Pro") return "swebench-pro-harbor"
+  if (value === "lolbench" || value === "swebench-pro-harbor") return value
+  throw new Error(`Unsupported PACT harness benchmark: ${String(value)}`)
+}
+
+function positiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1 ? value : undefined
 }
 
 function scoreCase(result: HarnessCaseResult): number {
@@ -744,7 +858,7 @@ function caseMap(results: HarnessCaseResult[]): Map<string, HarnessCaseResult> {
   return new Map(results.map((entry) => [entry.case_id, entry]))
 }
 
-async function evaluateHarnessOnSuite(input: {
+export async function evaluateHarnessOnSuite(input: {
   suite: HarnessSuite
   harnessId: string
   harnessDir: string
@@ -880,7 +994,7 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`
 }
 
-function runExternalCase(input: {
+export function runExternalCase(input: {
   runnerCommand: string
   caseItem: HarnessSuiteCase
   harnessId: string
@@ -892,6 +1006,10 @@ function runExternalCase(input: {
   const command = renderRunnerCommand(input.runnerCommand, {
     case_id: input.caseItem.id,
     resume_loop_dir: input.caseItem.resume_loop_dir,
+    instance_id: input.caseItem.instance_id,
+    task_path: input.caseItem.task_path,
+    language: input.caseItem.language,
+    repo: input.caseItem.repo,
     max_rounds: input.caseItem.max_rounds,
     verification_command: input.caseItem.verification_command,
     harness_id: input.harnessId,
@@ -923,6 +1041,26 @@ function runExternalCase(input: {
     stop_reason: result.status === 0 ? "runner_returned_no_case_result" : "runner_failed",
     infra_error: result.stderr || result.stdout || result.error?.message,
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  return typeof record[key] === "string" && record[key] ? record[key] : undefined
+}
+
+function numericRecordField(record: Record<string, unknown>, key: string): number | undefined {
+  return typeof record[key] === "number" && Number.isFinite(record[key]) ? record[key] : undefined
+}
+
+function elapsedSeconds(start: string | undefined, finish: string | undefined): number | undefined {
+  if (!start || !finish) return undefined
+  const startMs = Date.parse(start)
+  const finishMs = Date.parse(finish)
+  if (!Number.isFinite(startMs) || !Number.isFinite(finishMs) || finishMs < startMs) return undefined
+  return (finishMs - startMs) / 1000
 }
 
 if (import.meta.main) {

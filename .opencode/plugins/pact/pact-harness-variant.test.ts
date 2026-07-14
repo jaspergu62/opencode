@@ -144,4 +144,39 @@ describe("Codex PACT harness variant output", () => {
 
     expect(() => validateCodexHarnessVariantOutput(codexOutput(files), { variantDir })).toThrow(/change_manifest/i)
   })
+
+  test("rejects benchmark instance leakage from executable harness files", () => {
+    const variantDir = join(tempDir(), "pact-harness", "variants", "humanize-inspired-v1")
+    const files = validFiles()
+    const review = files.find((file) => file.path.endsWith("templates/review.md"))
+    if (!review) throw new Error("missing review fixture")
+    review.content += "\nSpecial-case instance_example__repo-deadbeef.\n"
+
+    expect(() =>
+      validateCodexHarnessVariantOutput(codexOutput(files), {
+        variantDir,
+        forbiddenTerms: ["example-case", "example-repo"],
+      }),
+    ).toThrow(/benchmark leakage/i)
+  })
+
+  test("allows case IDs only in change attribution metadata", () => {
+    const variantDir = join(tempDir(), "pact-harness", "variants", "humanize-inspired-v1")
+    const files = validFiles()
+    const changeManifest = files.find((file) => file.path.endsWith("change_manifest.json"))
+    if (!changeManifest) throw new Error("missing change manifest fixture")
+    changeManifest.content = JSON.stringify({
+      schema: "pact-harness-change/v1",
+      variant_id: "humanize-inspired-v1",
+      predicted_fixes: ["example-case"],
+      changed_harness_files: ["templates/review.md"],
+    })
+
+    expect(() =>
+      validateCodexHarnessVariantOutput(codexOutput(files), {
+        variantDir,
+        forbiddenTerms: ["example-case"],
+      }),
+    ).not.toThrow()
+  })
 })

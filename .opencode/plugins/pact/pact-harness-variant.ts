@@ -151,7 +151,7 @@ export function parseCodexHarnessVariantOutput(text: string): { files: CodexHarn
 
 export function validateCodexHarnessVariantOutput(
   text: string,
-  options: { variantDir: string },
+  options: { variantDir: string; forbiddenTerms?: string[] },
 ): ValidatedCodexHarnessVariantFile[] {
   const variantDir = resolve(options.variantDir)
   const parsed = parseCodexHarnessVariantOutput(text)
@@ -179,15 +179,33 @@ export function validateCodexHarnessVariantOutput(
   const changeManifest = readRequiredJson(byRelativePath, "change_manifest.json") as Record<string, unknown>
   validateChangeManifest(changeManifest)
   if (byRelativePath.has("spec-import-profile.json")) readJson(byRelativePath.get("spec-import-profile.json")!)
+  validateBenchmarkLeakage(files, options.forbiddenTerms ?? [])
 
   return files
 }
 
-export function materializeCodexHarnessVariantOutput(text: string, options: { variantDir: string }): void {
+export function materializeCodexHarnessVariantOutput(
+  text: string,
+  options: { variantDir: string; forbiddenTerms?: string[] },
+): void {
   const files = validateCodexHarnessVariantOutput(text, options)
   for (const file of files) {
     mkdirSync(dirname(file.absolutePath), { recursive: true })
     writeFileSync(file.absolutePath, file.content.endsWith("\n") ? file.content : `${file.content}\n`, "utf-8")
+  }
+}
+
+function validateBenchmarkLeakage(files: ValidatedCodexHarnessVariantFile[], forbiddenTerms: string[]): void {
+  const normalizedTerms = forbiddenTerms.map((term) => term.trim().toLowerCase()).filter(Boolean)
+  for (const file of files) {
+    if (file.relativePath === "change_manifest.json") continue
+    const content = file.content.toLowerCase()
+    const leakedTerm = normalizedTerms.find((term) => content.includes(term))
+    if (leakedTerm || /\binstance_[a-z0-9][a-z0-9_.-]*__[a-z0-9_.-]+/i.test(file.content)) {
+      throw new Error(
+        `Benchmark leakage in executable harness file ${file.relativePath}${leakedTerm ? `: ${leakedTerm}` : ""}`,
+      )
+    }
   }
 }
 

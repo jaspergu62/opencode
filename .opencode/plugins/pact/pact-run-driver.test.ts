@@ -212,51 +212,6 @@ describe("PACT run driver", () => {
     expect(parsed.agent).toBe("pact-worker")
   })
 
-  test("rejects OpenRouter chat as a planner or reviewer backend", () => {
-    expect(() =>
-      cliArgs([
-        "--plan-file",
-        "/tmp/PROMPT.md",
-        "--planner-backend",
-        "openrouter-chat",
-        "--planner-model",
-        "openai/gpt-5.5",
-      ]),
-    ).toThrow("Unsupported PACT planner backend: openrouter-chat")
-    expect(() =>
-      cliArgs(["--plan-file", "/tmp/PROMPT.md", "--reviewer", "openrouter-chat", "--reviewer-model", "openai/gpt-5.5"]),
-    ).toThrow("Unsupported PACT reviewer backend: openrouter-chat")
-  })
-
-  test("parses OpenCode planner and reviewer backends with agents from CLI aliases", () => {
-    const parsed = cliArgs([
-      "--plan-file",
-      "/tmp/PROMPT.md",
-      "--planner-backend",
-      "opencode-cli",
-      "--planner-agent",
-      "pact-planner",
-      "--planner-model",
-      "openrouter/z-ai/glm-5.2",
-      "--reviewer",
-      "opencode-cli",
-      "--reviewer-agent",
-      "pact-reviewer",
-      "--reviewer-model",
-      "openrouter/z-ai/glm-5.2",
-      "--worker-agent",
-      "pact-worker",
-    ])
-
-    expect(parsed.plannerBackend).toBe("opencode-cli")
-    expect(parsed.plannerAgent).toBe("pact-planner")
-    expect(parsed.plannerModel).toBe("openrouter/z-ai/glm-5.2")
-    expect(parsed.reviewerBackend).toBe("opencode-cli")
-    expect(parsed.reviewerAgent).toBe("pact-reviewer")
-    expect(parsed.reviewerModel).toBe("openrouter/z-ai/glm-5.2")
-    expect(parsed.agent).toBe("pact-worker")
-  })
-
   test("defaults worker runner from PACT env", () => {
     const oldRunner = process.env.PACT_WORKER_RUNNER
     const oldImage = process.env.LOLBENCH_AGENT_IMAGE_TAG

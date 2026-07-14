@@ -75,6 +75,7 @@ export type SpecImportInput = {
   loopID?: string
   maxRounds?: number
   reviewerModel?: string | null
+  reviewerBackend?: "codex-cli" | "opencode-agent" | "opencode-cli"
   workerModel?: string | null
   workerConfigSource?: string | null
   sessionStrategy?: "new-per-round" | "same-session"
@@ -89,6 +90,10 @@ export type SpecImportResult = {
   loopID: string
   generatedFiles: string[]
   excludedFiles: string[]
+}
+
+export type InstructionSpecImportInput = Omit<SpecImportInput, "bundleDir"> & {
+  instructionFile: string
 }
 
 type BundleData = {
@@ -166,7 +171,7 @@ export function importSpecBundle(input: SpecImportInput): SpecImportResult {
     trajectory_mode: "full-redact",
     planner_backend: "spec-import",
     planner_model: null,
-    reviewer_backend: "codex-cli",
+    reviewer_backend: input.reviewerBackend ?? "codex-cli",
     reviewer_model: input.reviewerModel ?? "gpt-5.5",
     worker_backend: "opencode-cli",
     worker_model: input.workerModel ?? "zai-coding-plan/glm-5.2",
@@ -356,6 +361,86 @@ export function importSpecBundle(input: SpecImportInput): SpecImportResult {
   }
 }
 
+export function importInstructionSpec(input: InstructionSpecImportInput): SpecImportResult {
+  const instructionFile = resolve(input.instructionFile)
+  const instruction = readText(instructionFile)
+  const requirement = authoritativeInstruction(instruction)
+  const requirements = instructionRequirements(requirement)
+  const outputLoopDir = resolve(input.outputLoopDir)
+  const bundleDir = join(outputLoopDir, ".instruction-spec-input")
+  const sectionsDir = join(bundleDir, "enhanced_requirement_sections")
+  mkdirSync(sectionsDir, { recursive: true })
+  writeFileSync(join(bundleDir, "original_requirement.txt"), requirement.endsWith("\n") ? requirement : `${requirement}\n`, "utf-8")
+  writeFileSync(join(sectionsDir, "01_original_requirement.md"), `# Original Requirement\n\n${requirement.trim()}\n`, "utf-8")
+  writeFileSync(
+    join(sectionsDir, "02_decomposed_requirements.md"),
+    [
+      "# Decomposed Requirements",
+      "",
+      ...requirements.map(
+        (item, index) => `- **${requirementTitle(item, index)}** [REQ-${String(index + 1).padStart(3, "0")}]: ${item}`,
+      ),
+      "",
+    ].join("\n"),
+    "utf-8",
+  )
+  writeFileSync(
+    join(sectionsDir, "03_decomposed_implementation_steps.md"),
+    [
+      "# Decomposed Implementation Steps",
+      "",
+      ...requirements.flatMap((item, index) => {
+        const number = String(index + 1).padStart(3, "0")
+        const dependency = index === 0 ? "none" : `STEP-${String(index).padStart(3, "0")}`
+        return [
+          `- [ ] \`STEP-${number}\` ${requirementTitle(item, index)} [REQ-${number}]`,
+          `  Group: GRP-${number}; depends_on: ${dependency}`,
+          `  Action: ${item}`,
+          "  Rationale: Preserve the authoritative benchmark behavior without relying on hidden verifier data.",
+          "  Anchors: none",
+          `  Checks: ${verificationCheck(item)}`,
+          "  Risk if skipped: The implementation remains incomplete or regresses existing behavior.",
+          "  Confidence: 1.0; source=instruction; hard_requirement=True",
+        ]
+      }),
+      "",
+    ].join("\n"),
+    "utf-8",
+  )
+  writeFileSync(
+    join(sectionsDir, "04_formal_verification_checklist.md"),
+    [
+      "# Formal Verification Checklist",
+      "",
+      ...requirements.map((item) => `- Verify: ${verificationCheck(item)}`),
+      "- Run focused repository tests for changed behavior and a relevant regression test set when available.",
+      "- Inspect the final diff for unrelated changes and test-file modifications forbidden by the task.",
+      "",
+    ].join("\n"),
+    "utf-8",
+  )
+  writeFileSync(
+    join(sectionsDir, "05_edge_cases.md"),
+    [
+      "# Edge Cases",
+      "",
+      ...requirements.filter((item) => /\b(?:without|undefined|missing|other|existing|compat|error|empty|none|null)\b/i.test(item)).map((item) => `- ${item}`),
+      "- Preserve behavior outside the explicitly changed surface.",
+      "",
+    ].join("\n"),
+    "utf-8",
+  )
+  writeFileSync(
+    join(sectionsDir, "06_anti_patterns.md"),
+    "# Anti-Patterns\n\n- Do not inspect Harbor verifier files, gold patches, solution artifacts, or external code-host results.\n- Do not replace repository behavior with test-specific special cases.\n- Do not modify tests when the instruction says tests are already supplied.\n",
+    "utf-8",
+  )
+
+  const result = importSpecBundle({ ...input, bundleDir })
+  markInstructionImportArtifacts(result.loopDir)
+  return result
+}
+
 function readBundle(input: { bundleDir: string; outputLoopDir: string }): BundleData {
   const sectionsDir = join(input.bundleDir, "enhanced_requirement_sections")
   if (!existsSync(sectionsDir)) throw new Error(`Missing spec import sections directory: ${sectionsDir}`)
@@ -371,7 +456,7 @@ function readBundle(input: { bundleDir: string; outputLoopDir: string }): Bundle
     stripHeading(sectionTextFromSections(sections, "original_requirement")) ||
     readOptionalText(join(input.bundleDir, "original_requirement.txt")) ||
     stripHeading(sectionTextFromSections(sections, "problem_understanding")) ||
-    "Imported LoLBench requirement."
+    "Imported benchmark requirement."
   const baseData = {
     bundleDir: input.bundleDir,
     sectionsDir,
@@ -517,7 +602,7 @@ function renderSourcePlan(data: BundleData): string {
 function renderPlan(data: BundleData): string {
   return [
     "# Goal Description",
-    `Implement the imported LoLBench requirement: ${firstSentence(data.originalRequirement)} The worker edits workspace source/test files only; PACT/harness owns final patch export.`,
+    `Implement the imported benchmark requirement: ${firstSentence(data.originalRequirement)} The worker edits workspace source/test files only; PACT/harness owns final patch export.`,
     "",
     "## Acceptance Criteria",
     "| AC | Criterion | Positive Tests | Negative Tests |",
@@ -595,7 +680,7 @@ function renderGoalTracker(data: BundleData, targetSurfaceContract: string): str
     "## IMMUTABLE SECTION",
     "",
     "### Ultimate Goal",
-    `Implement the imported LoLBench requirement: ${firstSentence(data.originalRequirement)} The worker edits workspace source/test files only; PACT/harness owns final patch export.`,
+    `Implement the imported benchmark requirement: ${firstSentence(data.originalRequirement)} The worker edits workspace source/test files only; PACT/harness owns final patch export.`,
     "",
     "### Acceptance Criteria",
     "| AC | Criterion | Positive Tests | Negative Tests | Status |",
@@ -1320,7 +1405,63 @@ function stripHeading(text: string): string {
 function firstSentence(text: string): string {
   const stripped = stripHeading(text).replace(/\s+/g, " ").trim()
   const sentence = /^(.{1,280}?[.!?])(?:\s|$)/.exec(stripped)?.[1]
-  return (sentence ?? stripped.slice(0, 280)).trim() || "Imported LoLBench requirement."
+  return (sentence ?? stripped.slice(0, 280)).trim() || "Imported benchmark requirement."
+}
+
+function authoritativeInstruction(instruction: string): string {
+  const tagged = /<pr_description>\s*([\s\S]*?)\s*<\/pr_description>/i.exec(instruction)?.[1]
+  return (tagged ?? instruction).trim()
+}
+
+function instructionRequirements(instruction: string): string[] {
+  const bulletRequirements = instruction
+    .split(/\r?\n/)
+    .map((line) => /^\s*(?:[-*]|\d+[.)])\s+(.+?)\s*$/.exec(line)?.[1]?.trim())
+    .filter((line): line is string => Boolean(line))
+    .map((line) => line.replace(/^`?REQ-\d+`?\s*[:.-]?\s*/i, "").trim())
+    .filter((line) => line.length >= 12)
+    .filter((line) => !/^(?:as a first step|create a script|edit the source|rerun your reproduce|think about edgecases)/i.test(line))
+  const uniqueRequirements = [...new Set(bulletRequirements)]
+  if (uniqueRequirements.length) return uniqueRequirements.slice(0, 30)
+  const paragraphs = instruction
+    .split(/\n\s*\n/)
+    .map((paragraph) => stripHeading(paragraph).replace(/\s+/g, " ").trim())
+    .filter((paragraph) => paragraph.length >= 12)
+  return paragraphs.length ? paragraphs.slice(0, 12) : ["Implement the authoritative benchmark instruction."]
+}
+
+function requirementTitle(requirement: string, index: number): string {
+  const normalized = requirement
+    .replace(/[`*_#]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[.:;]+$/, "")
+    .trim()
+  const words = normalized.split(" ").slice(0, 10).join(" ")
+  return words || `Requirement ${index + 1}`
+}
+
+function verificationCheck(requirement: string): string {
+  return requirement.replace(/\b(?:should|must)\b/gi, "is verified to").replace(/[.;]+$/, "")
+}
+
+function markInstructionImportArtifacts(loopDir: string): void {
+  for (const fileName of ["state.json", "loop-manifest.json", "spec-input-manifest.json", "round-00-result.json"]) {
+    const filePath = join(loopDir, fileName)
+    if (!existsSync(filePath)) continue
+    const artifact = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>
+    if (fileName === "state.json") {
+      const specImport = artifact.spec_import && typeof artifact.spec_import === "object"
+        ? (artifact.spec_import as Record<string, unknown>)
+        : {}
+      specImport.artifact_generation_strategy = "instruction-markdown-v1"
+      specImport.instruction_only = true
+      artifact.spec_import = specImport
+    } else {
+      artifact.artifact_generation_strategy = "instruction-markdown-v1"
+      artifact.instruction_only = true
+    }
+    writeJsonFile(filePath, artifact)
+  }
 }
 
 function blockField(block: string, name: string): string | undefined {
