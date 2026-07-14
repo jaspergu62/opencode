@@ -23,6 +23,7 @@ import {
   findActiveLoop,
   artifactPaths,
   isProtectedWrite,
+  loadPactHarness,
   parsePlannerArtifacts,
   readState,
   redactText,
@@ -82,6 +83,7 @@ export type PactPluginOptions = {
   benchmarkStrictNetwork?: boolean
   verificationCommand?: string
   verificationTimeoutMs?: number
+  harnessDir?: string
 }
 
 type PromptClient = {
@@ -109,6 +111,7 @@ export const PACT_PLUGIN_DEFAULTS = {
   sessionStrategy: "new-per-round" as SessionStrategy,
   roundBoundary: "session_idle" as RoundBoundary,
   trajectoryMode: "full-redact" as TrajectoryMode,
+  harnessDir: undefined as string | undefined,
 }
 
 export const PactPlugin: Plugin = async ({ client, directory, worktree }, options?: PactPluginOptions) => {
@@ -137,14 +140,13 @@ export const PactPlugin: Plugin = async ({ client, directory, worktree }, option
           full_alignment_interval: tool.schema.number().optional(),
           verification_command: tool.schema.string().optional(),
           verification_timeout_ms: tool.schema.number().optional(),
+          harness_dir: tool.schema.string().optional(),
         },
         async execute(args, context) {
           const plannerBackend = args.planner_backend ?? cfg.plannerBackend
-          const plannerModel =
-            plannerBackend === "codex-cli" ? args.planner_model ?? plannerModelForBackend(plannerBackend, cfg) : null
+          const plannerModel = args.planner_model ?? plannerModelForBackend(plannerBackend, cfg)
           const reviewerBackend = args.reviewer_backend ?? cfg.reviewerBackend
-          const reviewerModel =
-            reviewerBackend === "codex-cli" ? args.reviewer_model ?? reviewerModelForBackend(reviewerBackend, cfg) : null
+          const reviewerModel = args.reviewer_model ?? reviewerModelForBackend(reviewerBackend, cfg)
           const workerBackend = args.worker_backend ?? cfg.workerBackend ?? PACT_PLUGIN_DEFAULTS.workerBackend
           const workerModel = args.worker_model ?? cfg.workerModel ?? PACT_PLUGIN_DEFAULTS.workerModel
           const workerConfigSource =
@@ -154,6 +156,7 @@ export const PactPlugin: Plugin = async ({ client, directory, worktree }, option
           const trajectoryMode = args.trajectory_mode ?? cfg.trajectoryMode ?? PACT_PLUGIN_DEFAULTS.trajectoryMode
           const verificationCommand = args.verification_command ?? cfg.verificationCommand
           const verificationTimeoutMs = args.verification_timeout_ms ?? cfg.verificationTimeoutMs
+          const harness = loadPactHarness(args.harness_dir ?? cfg.harnessDir ?? process.env.PACT_HARNESS_DIR)
           const loop = createLoop({
             projectRoot: context.worktree || context.directory || projectRoot,
             planFile: args.plan_file,
@@ -172,11 +175,12 @@ export const PactPlugin: Plugin = async ({ client, directory, worktree }, option
             fullAlignmentInterval: args.full_alignment_interval ?? cfg.fullAlignmentInterval,
             verificationCommand,
             verificationTimeoutMs,
+            harnessDir: harness?.dir,
           })
           const planContent = readFileSync(join(loop.loopDir, "source-plan.md"), "utf-8")
 
           try {
-            const plannerPrompt = buildPlannerPrompt({ planPath: args.plan_file, planContent })
+            const plannerPrompt = buildPlannerPrompt({ planPath: args.plan_file, planContent, harness })
             writeFileSync(join(loop.loopDir, "round-00-plan-prompt.md"), plannerPrompt, "utf-8")
             let plannerText = await invokePlannerBackend({
               client: promptClient,
@@ -261,6 +265,7 @@ export const PactPlugin: Plugin = async ({ client, directory, worktree }, option
             round: 1,
             todoPath: join(loop.loopDir, "todo.md"),
             goalTrackerPath: join(loop.loopDir, "goal-tracker.md"),
+            harness,
           })
           writeRoundStartArtifacts({
             loopDir: loop.loopDir,
@@ -599,6 +604,7 @@ Goal tracker: ${join(loop.loopDir, "goal-tracker.md")}
           sessionID: workingState.active_session_id,
           data: { summary_path: currentSummaryPath, review_kind: reviewKind },
         })
+        const harness = loadPactHarness(workingState.harness_dir ?? cfg.harnessDir ?? process.env.PACT_HARNESS_DIR)
         const reviewPrompt = buildReviewPrompt({
           loopDir: loop.loopDir,
           round,
@@ -608,6 +614,7 @@ Goal tracker: ${join(loop.loopDir, "goal-tracker.md")}
           patchArtifactPath: join(loop.loopDir, `round-${roundName(round)}-patch-artifact.json`),
           verificationPath: verification ? artifactPaths(loop.loopDir, round).verification : undefined,
           reviewKind,
+          harness,
         })
         writeFileSync(join(loop.loopDir, `round-${roundName(round)}-review-prompt.md`), reviewPrompt, "utf-8")
         let reviewText: string
@@ -617,7 +624,8 @@ Goal tracker: ${join(loop.loopDir, "goal-tracker.md")}
             workingState.reviewer_backend === "codex-cli"
               ? invokeCodexReviewer(reviewPrompt, { ...cfg, reviewerModel: reviewerModel ?? undefined }, projectRoot)
               : await invokeOpenCodeAgent(promptClient, {
-                  agent: cfg.reviewerAgent,
+                  agent: cfg.reviewerAgent ?? PACT_PLUGIN_DEFAULTS.reviewerAgent,
+                  model: reviewerModel,
                   title: `PACT review round ${roundName(round)}`,
                   prompt: reviewPrompt,
                   parentSessionID: workingState.active_session_id,
@@ -1186,15 +1194,17 @@ async function maybePromptNextPhase(
   if (state.status !== "running") return
   const feedbackPath = join(loopDir, `round-${roundName(reviewedRound)}-feedback.md`)
   const goalTrackerPath = join(loopDir, "goal-tracker.md")
+  const harness = loadPactHarness(state.harness_dir ?? cfg.harnessDir ?? process.env.PACT_HARNESS_DIR)
   let prompt: string | undefined
   if (state.phase === "finalize") {
-    prompt = buildFinalizePrompt({ loopDir, round: state.current_round, goalTrackerPath })
+    prompt = buildFinalizePrompt({ loopDir, round: state.current_round, goalTrackerPath, harness })
   } else if (state.phase === "review") {
     prompt = buildReviewPhasePrompt({
       loopDir,
       round: state.current_round,
       feedbackPath,
       goalTrackerPath,
+      harness,
     })
   } else if (state.phase === "implementation") {
     const continuationPackagePath = artifactPaths(loopDir, reviewedRound).continuationPackage
@@ -1204,6 +1214,7 @@ async function maybePromptNextPhase(
       feedbackPath,
       goalTrackerPath,
       continuationPackagePath,
+      harness,
     })
   }
   if (!prompt) return
@@ -1254,10 +1265,11 @@ async function handleFinalizeIdle(input: {
 }): Promise<void> {
   const finalizeSummaryPath = join(input.loopDir, "finalize-summary.md")
   const goalTrackerPath = join(input.loopDir, "goal-tracker.md")
+  const harness = loadPactHarness(input.state.harness_dir ?? input.cfg.harnessDir ?? process.env.PACT_HARNESS_DIR)
   if (!existsSync(finalizeSummaryPath)) {
     const promptPath = join(input.loopDir, `round-${roundName(input.round)}-prompt.md`)
     if (!existsSync(promptPath) && input.state.active_session_id) {
-      const prompt = buildFinalizePrompt({ loopDir: input.loopDir, round: input.round, goalTrackerPath })
+      const prompt = buildFinalizePrompt({ loopDir: input.loopDir, round: input.round, goalTrackerPath, harness })
       writeRoundStartArtifacts({
         loopDir: input.loopDir,
         loopID: input.state.loop_id,
@@ -1922,6 +1934,7 @@ async function invokePlannerBackend(input: {
   }
   return invokeOpenCodeAgent(input.client, {
     agent: input.cfg.plannerAgent ?? PACT_PLUGIN_DEFAULTS.plannerAgent,
+    model: input.plannerModel,
     title: "PACT planner",
     prompt: input.prompt,
     parentSessionID: input.parentSessionID,
@@ -2016,12 +2029,13 @@ function verificationConfigForState(state: PactState, cfg: PactPluginOptions): P
 }
 
 function plannerModelForBackend(backend: PlannerBackend, cfg: PactPluginOptions): string | null {
-  if (backend !== "codex-cli") return null
+  if (backend === "spec-import") return null
+  if (backend !== "codex-cli") return cfg.plannerModel ?? PACT_PLUGIN_DEFAULTS.plannerModel
   return codexModelFromArgs(cfg.plannerCodexArgs) ?? cfg.plannerModel ?? PACT_PLUGIN_DEFAULTS.plannerModel
 }
 
 function reviewerModelForBackend(backend: ReviewerBackend, cfg: PactPluginOptions): string | null {
-  if (backend !== "codex-cli") return null
+  if (backend !== "codex-cli") return cfg.reviewerModel ?? PACT_PLUGIN_DEFAULTS.reviewerModel
   return codexModelFromArgs(cfg.codexArgs) ?? cfg.reviewerModel ?? PACT_PLUGIN_DEFAULTS.reviewerModel
 }
 
@@ -2053,13 +2067,14 @@ function safeUnknownText(value: unknown): string {
 
 async function invokeOpenCodeAgent(
   client: PromptClient,
-  input: { agent: string; title: string; prompt: string; parentSessionID?: string },
+  input: { agent: string; model?: string | null; title: string; prompt: string; parentSessionID?: string },
 ): Promise<string> {
   if (!client.session?.create || !client.session?.prompt) {
     throw new Error("OpenCode client session API is unavailable")
   }
+  const model = openCodeModelRef(input.model)
   const created = await client.session.create({
-    body: { parentID: input.parentSessionID, title: input.title },
+    body: { parentID: input.parentSessionID, title: input.title, ...(model ? { model } : {}) },
   })
   const sessionID = created.data?.id
   if (!sessionID) throw new Error(`Failed to create ${input.agent} session`)
@@ -2067,10 +2082,18 @@ async function invokeOpenCodeAgent(
     path: { id: sessionID },
     body: {
       agent: input.agent,
+      ...(model ? { model } : {}),
       parts: [{ type: "text", text: input.prompt }],
     },
   })
   return extractTextParts(result)
+}
+
+function openCodeModelRef(model: string | null | undefined): { providerID: string; id: string } | undefined {
+  if (!model) return undefined
+  const slash = model.indexOf("/")
+  if (slash <= 0 || slash === model.length - 1) return undefined
+  return { providerID: model.slice(0, slash), id: model.slice(slash + 1) }
 }
 
 async function promptSession(client: PromptClient, sessionID: string, agent: string, prompt: string): Promise<void> {

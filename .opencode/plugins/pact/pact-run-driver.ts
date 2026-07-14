@@ -23,6 +23,7 @@ import {
   extractReviewStatusDelta,
   findActiveLoop,
   ensureGitInfoExclude,
+  loadPactHarness,
   markWorkerRoundAttempted,
   markWorkerRoundCompleted,
   parsePlannerArtifacts,
@@ -43,7 +44,9 @@ import {
   writeVerificationArtifact,
   type FailureClassificationInput,
   type LoopStatus,
+  type ModelReasoningEffort,
   type PactState,
+  type PactHarness,
   type PatchArtifact,
   type PlannerBackend,
   type PlannerValidationResult,
@@ -62,10 +65,20 @@ type SpawnResult = {
   error?: Error
 }
 
+type SpawnSyncOptions = {
+  cwd: string
+  input?: string
+  encoding: "utf-8"
+  stdio?: Array<"inherit" | "pipe">
+  maxBuffer: number
+  timeout?: number
+  env?: Record<string, string | undefined>
+}
+
 type SpawnSyncLike = (
   command: string,
   args: string[],
-  options: { cwd: string; input: string; encoding: "utf-8"; stdio: Array<"inherit" | "pipe">; maxBuffer: number },
+  options: SpawnSyncOptions,
 ) => SpawnResult
 
 type WorkerRunner = "host" | "docker"
@@ -89,13 +102,33 @@ type DriverPlanner = (
   input: { projectRoot: string; loopDir: string; planFile: string; state: PactState; repair: boolean },
 ) => string
 
+type DriverOpenRouterChat = (
+  prompt: string,
+  input: { projectRoot: string; loopDir: string; planFile: string; state: PactState; model: string; repair: boolean },
+) => string
+
+function defaultDriverPlannerModel(backend: PlannerBackend): string | null {
+  if (backend === "openrouter-chat") return "z-ai/glm-5.2"
+  if (backend === "codex-cli") return "gpt-5.5"
+  return null
+}
+
+function defaultDriverReviewerModel(backend: ReviewerBackend, workerModel: string): string | null {
+  if (backend === "opencode-cli") return workerModel
+  if (backend === "codex-cli") return "gpt-5.4-mini"
+  return null
+}
+
 export function buildPactStartPrompt(input: {
   planFile: string
   maxRounds: number
   plannerBackend?: string
+  plannerAgent?: string
   plannerModel?: string
   reviewerBackend?: string
+  reviewerAgent?: string
   reviewerModel?: string
+  workerAgent?: string
   workerModel: string
   fullAlignmentInterval?: number
   sessionStrategy?: SessionStrategy
@@ -111,10 +144,13 @@ export function buildPactStartPrompt(input: {
 - plan_file="${input.planFile}"
 - max_rounds=${input.maxRounds}
 - planner_backend=${input.plannerBackend ?? "codex-cli"}
+- planner_agent=${input.plannerAgent ?? "pact-planner"}
 - planner_model=${input.plannerModel ?? "gpt-5.5"}
 - reviewer_backend=${input.reviewerBackend ?? "codex-cli"}
+- reviewer_agent=${input.reviewerAgent ?? "pact-reviewer"}
 - reviewer_model=${input.reviewerModel ?? "gpt-5.4-mini"}
 - worker_backend=opencode-cli
+- worker_agent=${input.workerAgent ?? "pact-worker"}
 - worker_model=${input.workerModel}
 - worker_config_source=mini-swe-agent-env
 - session_strategy=${input.sessionStrategy ?? "new-per-round"}
@@ -136,6 +172,9 @@ export function runPactDriver(input: {
   dockerCommand?: string
   containerOpencodeCommand?: string
   agent?: string
+  plannerAgent?: string
+  reviewerAgent?: string
+  workerAgent?: string
   variant?: string
   workerRunner?: WorkerRunner
   workerContainerImage?: string
@@ -144,8 +183,10 @@ export function runPactDriver(input: {
   workerContainerPluginMount?: string
   plannerBackend?: PlannerBackend
   plannerModel?: string
+  plannerEffort?: ModelReasoningEffort
   reviewerBackend?: ReviewerBackend
   reviewerModel?: string
+  reviewerEffort?: ModelReasoningEffort
   fullAlignmentInterval?: number
   maxInvocations?: number
   sessionStrategy?: SessionStrategy
@@ -153,15 +194,22 @@ export function runPactDriver(input: {
   verificationTimeoutMs?: number
   resumeLoopDir?: string
   resumeMode?: ResumeMode
+  harnessDir?: string
   spawnSync?: SpawnSyncLike
   planner?: DriverPlanner
   reviewer?: DriverReviewer
+  openRouterChat?: DriverOpenRouterChat
   log?: (message: string) => void
 }): PactDriverResult {
   const projectRoot = resolve(input.projectRoot ?? cwd())
   const spawn = input.spawnSync ?? defaultSpawnSync
+  const openCodeShellTrampoline = !input.spawnSync
   const maxInvocations = input.maxInvocations ?? input.maxRounds + 4
   const workerRunner = input.workerRunner ?? "host"
+  const plannerBackend = input.plannerBackend ?? "codex-cli"
+  const reviewerBackend = input.reviewerBackend ?? "codex-cli"
+  const plannerEffort = input.plannerEffort ?? "medium"
+  const reviewerEffort = input.reviewerEffort ?? "medium"
   const workerContainerImage = input.workerContainerImage ?? env.LOLBENCH_AGENT_IMAGE_TAG ?? env.LOLBENCH_IMAGE_TAG
   if (workerRunner === "docker" && !workerContainerImage) {
     const log = input.log ?? console.error
@@ -169,14 +217,19 @@ export function runPactDriver(input: {
     return { status: "opencode_failed", invocations: 0, exitCode: 2 }
   }
   let invocations = 0
+  const harness = loadPactHarness(input.harnessDir ?? env.PACT_HARNESS_DIR)
   const initialized = initializeDriverLoop({
     projectRoot,
     planFile: input.planFile,
     maxRounds: input.maxRounds,
-    plannerBackend: input.plannerBackend ?? "codex-cli",
-    plannerModel: input.plannerModel ?? "gpt-5.5",
-    reviewerBackend: input.reviewerBackend ?? "codex-cli",
-    reviewerModel: input.reviewerModel ?? "gpt-5.4-mini",
+    plannerBackend,
+    plannerModel: input.plannerModel ?? defaultDriverPlannerModel(plannerBackend),
+    plannerEffort: plannerBackend === "codex-cli" ? plannerEffort : undefined,
+    reviewerBackend,
+    reviewerModel: input.reviewerModel ?? defaultDriverReviewerModel(reviewerBackend, input.model),
+    reviewerEffort: reviewerBackend === "codex-cli" ? reviewerEffort : undefined,
+    plannerAgent: input.plannerAgent ?? "pact-planner",
+    reviewerAgent: input.reviewerAgent ?? "pact-reviewer",
     workerModel: input.model,
     workerConfigSource: "mini-swe-agent-env",
     fullAlignmentInterval: input.fullAlignmentInterval,
@@ -185,7 +238,12 @@ export function runPactDriver(input: {
     verificationTimeoutMs: input.verificationTimeoutMs,
     resumeLoopDir: input.resumeLoopDir,
     resumeMode: input.resumeMode,
+    harness,
+    opencodeCommand: input.opencodeCommand ?? "opencode",
+    spawnSync: spawn,
+    shellTrampoline: openCodeShellTrampoline,
     planner: input.planner,
+    openRouterChat: input.openRouterChat,
   })
   let loopDir = initialized.loopDir
   if (initialized.state.status !== "running") {
@@ -210,7 +268,7 @@ export function runPactDriver(input: {
     markWorkerRoundAttempted(loopDir, invokedRound)
     const opencodeArgs = buildOpencodeRunArgs({
       model: input.model,
-      agent: input.agent,
+      agent: input.workerAgent ?? input.agent,
       variant: input.variant,
       sessionID: sessionStrategy === "same-session" ? sessionID : undefined,
     })
@@ -226,12 +284,13 @@ export function runPactDriver(input: {
       workerPluginMount: input.workerPluginMount,
       workerContainerPluginMount: input.workerContainerPluginMount ?? "/opt/opencode-pact-plugins",
     })
-    const result = spawn(invocation.command, invocation.args, {
+    const result = spawnOpenCodeRun({
+      spawn,
+      command: invocation.command,
+      args: invocation.args,
       cwd: projectRoot,
-      input: nextPrompt,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      maxBuffer: OPENCODE_RUN_MAX_BUFFER,
+      prompt: nextPrompt,
+      shellTrampoline: openCodeShellTrampoline,
     })
     invocations++
     if (result.error || result.status !== 0) {
@@ -262,8 +321,14 @@ export function runPactDriver(input: {
       loopDir,
       round: invokedRound,
       reviewer: input.reviewer,
-      agent: input.agent,
+      spawnSync: spawn,
+      opencodeCommand: input.opencodeCommand ?? "opencode",
+      shellTrampoline: openCodeShellTrampoline,
+      reviewerAgent: input.reviewerAgent ?? "pact-reviewer",
+      reviewerEffort,
+      agent: input.workerAgent ?? input.agent,
       model: input.model,
+      harness,
     })
     if (state.status !== "running") {
       return { status: state.status, invocations, loopDir, round: state.next_round ?? state.current_round, exitCode: 0 }
@@ -300,8 +365,12 @@ function initializeDriverLoop(input: {
   maxRounds: number
   plannerBackend: PlannerBackend
   plannerModel: string | null
+  plannerEffort?: ModelReasoningEffort
   reviewerBackend: ReviewerBackend
   reviewerModel: string | null
+  reviewerEffort?: ModelReasoningEffort
+  plannerAgent: string
+  reviewerAgent: string
   workerModel: string
   workerConfigSource?: string
   fullAlignmentInterval?: number
@@ -310,7 +379,12 @@ function initializeDriverLoop(input: {
   verificationTimeoutMs?: number
   resumeLoopDir?: string
   resumeMode?: ResumeMode
+  harness?: PactHarness
+  opencodeCommand: string
+  spawnSync: SpawnSyncLike
+  shellTrampoline: boolean
   planner?: DriverPlanner
+  openRouterChat?: DriverOpenRouterChat
 }): { loopDir: string; state: PactState } {
   if (input.resumeLoopDir) {
     return initializeDriverLoopFromRound0(input)
@@ -321,8 +395,10 @@ function initializeDriverLoop(input: {
     maxRounds: input.maxRounds,
     plannerBackend: input.plannerBackend,
     plannerModel: input.plannerModel,
+    plannerEffort: input.plannerEffort,
     reviewerBackend: input.reviewerBackend,
     reviewerModel: input.reviewerModel,
+    reviewerEffort: input.reviewerEffort,
     workerBackend: "opencode-cli",
     workerModel: input.workerModel,
     workerConfigSource: input.workerConfigSource,
@@ -332,10 +408,11 @@ function initializeDriverLoop(input: {
     fullAlignmentInterval: input.fullAlignmentInterval,
     verificationCommand: input.verificationCommand,
     verificationTimeoutMs: input.verificationTimeoutMs,
+    harnessDir: input.harness?.dir,
   })
   const planContent = readFileSync(join(loop.loopDir, "source-plan.md"), "utf-8")
   try {
-    const plannerPrompt = buildPlannerPrompt({ planPath: input.planFile, planContent })
+    const plannerPrompt = buildPlannerPrompt({ planPath: input.planFile, planContent, harness: input.harness })
     writeFileSync(join(loop.loopDir, "round-00-plan-prompt.md"), plannerPrompt, "utf-8")
     let plannerText = invokeDriverPlanner(plannerPrompt, {
       projectRoot: input.projectRoot,
@@ -343,7 +420,14 @@ function initializeDriverLoop(input: {
       planFile: input.planFile,
       state: readState(loop.loopDir),
       model: input.plannerModel ?? "gpt-5.5",
+      effort: input.plannerEffort ?? "medium",
+      backend: input.plannerBackend,
+      agent: input.plannerAgent,
+      opencodeCommand: input.opencodeCommand,
+      spawnSync: input.spawnSync,
+      shellTrampoline: input.shellTrampoline,
       planner: input.planner,
+      openRouterChat: input.openRouterChat,
       repair: false,
     })
     writeFileSync(join(loop.loopDir, "round-00-plan-output.md"), redactText(plannerText), "utf-8")
@@ -362,7 +446,14 @@ function initializeDriverLoop(input: {
         planFile: input.planFile,
         state: readState(loop.loopDir),
         model: input.plannerModel ?? "gpt-5.5",
+        effort: input.plannerEffort ?? "medium",
+        backend: input.plannerBackend,
+        agent: input.plannerAgent,
+        opencodeCommand: input.opencodeCommand,
+        spawnSync: input.spawnSync,
+        shellTrampoline: input.shellTrampoline,
         planner: input.planner,
+        openRouterChat: input.openRouterChat,
         repair: true,
       })
       writeFileSync(join(loop.loopDir, "round-00-plan-repair-output.md"), redactText(plannerText), "utf-8")
@@ -400,6 +491,7 @@ function initializeDriverLoop(input: {
     todoPath: join(loop.loopDir, "todo.md"),
     goalTrackerPath: join(loop.loopDir, "goal-tracker.md"),
     workerPath: workerPathRenderer(input.projectRoot),
+    harness: input.harness,
   })
   writeFileSync(join(loop.loopDir, "round-01-prompt.md"), prompt, "utf-8")
   ensureDriverRoundStartArtifacts({
@@ -418,8 +510,10 @@ function initializeDriverLoopFromRound0(input: {
   maxRounds: number
   plannerBackend: PlannerBackend
   plannerModel: string | null
+  plannerEffort?: ModelReasoningEffort
   reviewerBackend: ReviewerBackend
   reviewerModel: string | null
+  reviewerEffort?: ModelReasoningEffort
   workerModel: string
   workerConfigSource?: string
   fullAlignmentInterval?: number
@@ -428,6 +522,7 @@ function initializeDriverLoopFromRound0(input: {
   verificationTimeoutMs?: number
   resumeLoopDir?: string
   resumeMode?: ResumeMode
+  harness?: PactHarness
 }): { loopDir: string; state: PactState } {
   if (input.resumeMode && input.resumeMode !== "round0") {
     throw new Error(`Unsupported PACT resume mode: ${input.resumeMode}`)
@@ -438,10 +533,12 @@ function initializeDriverLoopFromRound0(input: {
   ensureGitInfoExclude(input.projectRoot, "/*.patch")
   ensureGitInfoExclude(input.projectRoot, "/*.diff")
   const sourceState = readState(sourceLoopDir)
+  const plannerBackend = sourceState.planner_backend ?? input.plannerBackend
   const sourceLoopID = sourceState.loop_id || basename(sourceLoopDir)
   const loopDir = allocateResumeLoopDir(input.projectRoot, sourceLoopID)
   const loopID = basename(loopDir)
   copyRound0ResumePackage(sourceLoopDir, loopDir)
+  rewriteResumeSpecInputManifest(loopDir)
 
   const now = new Date().toISOString()
   const state: PactState = {
@@ -467,13 +564,16 @@ function initializeDriverLoopFromRound0(input: {
     session_strategy: input.sessionStrategy ?? sourceState.session_strategy ?? "new-per-round",
     round_boundary: "run_exit",
     trajectory_mode: sourceState.trajectory_mode ?? "full-redact",
-    planner_backend: sourceState.planner_backend ?? input.plannerBackend,
+    planner_backend: plannerBackend,
     planner_model: sourceState.planner_model === undefined ? input.plannerModel : sourceState.planner_model,
+    planner_effort: plannerBackend === "codex-cli" ? (sourceState.planner_effort ?? input.plannerEffort ?? "medium") : undefined,
     reviewer_backend: input.reviewerBackend,
     reviewer_model: input.reviewerModel,
+    reviewer_effort: input.reviewerBackend === "codex-cli" ? (input.reviewerEffort ?? "medium") : undefined,
     worker_backend: "opencode-cli",
     worker_model: input.workerModel,
     worker_config_source: input.workerConfigSource,
+    harness_dir: input.harness?.dir ?? sourceState.harness_dir,
     verification_command: input.verificationCommand,
     verification_timeout_ms: input.verificationTimeoutMs,
     created_at: now,
@@ -503,6 +603,7 @@ function initializeDriverLoopFromRound0(input: {
     todoPath: join(loopDir, "todo.md"),
     goalTrackerPath: join(loopDir, "goal-tracker.md"),
     workerPath: workerPathRenderer(input.projectRoot),
+    harness: input.harness,
   })
   writeFileSync(join(loopDir, "round-01-prompt.md"), prompt, "utf-8")
   ensureDriverRoundStartArtifacts({
@@ -562,6 +663,12 @@ function copyRound0ResumePackage(sourceLoopDir: string, targetLoopDir: string): 
       fileName === "plan.md" ||
       fileName === "todo.md" ||
       fileName === "goal-tracker.md" ||
+      fileName === "target-surface-contract.md" ||
+      fileName === "target-surfaces.json" ||
+      fileName === "behavioral-contract.md" ||
+      fileName === "coverage-obligation.json" ||
+      fileName === "ultimate-goal-checklist.json" ||
+      fileName === "reviewer-audit-checklist.md" ||
       fileName.startsWith("spec-") ||
       fileName.startsWith("round-00-")
     ) {
@@ -569,6 +676,58 @@ function copyRound0ResumePackage(sourceLoopDir: string, targetLoopDir: string): 
     }
   }
   copyFileSync(join(sourceLoopDir, "loop-manifest.json"), join(targetLoopDir, "resume-source-loop-manifest.json"))
+}
+
+function rewriteResumeSpecInputManifest(loopDir: string): void {
+  const manifestPath = join(loopDir, "spec-input-manifest.json")
+  if (!existsSync(manifestPath)) return
+  let manifest: Record<string, unknown>
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf-8"))
+  } catch {
+    return
+  }
+  const evidenceDir = join(loopDir, "spec-source", "enhanced_requirement_sections")
+  manifest.copied_evidence_dir = evidenceDir
+  if (existsSync(join(loopDir, "spec-code-localization.md"))) {
+    manifest.code_localization_file = join(loopDir, "spec-code-localization.md")
+  }
+  if (existsSync(join(loopDir, "target-surfaces.json"))) {
+    manifest.target_surfaces_file = join(loopDir, "target-surfaces.json")
+  }
+  if (existsSync(join(loopDir, "target-surface-contract.md"))) {
+    manifest.target_surface_contract_file = join(loopDir, "target-surface-contract.md")
+  }
+  if (existsSync(join(loopDir, "behavioral-contract.md"))) {
+    manifest.behavioral_contract_file = join(loopDir, "behavioral-contract.md")
+  }
+  if (existsSync(join(loopDir, "coverage-obligation.json"))) {
+    manifest.coverage_obligation_file = join(loopDir, "coverage-obligation.json")
+  }
+  if (existsSync(join(loopDir, "ultimate-goal-checklist.json"))) {
+    manifest.ultimate_goal_checklist_file = join(loopDir, "ultimate-goal-checklist.json")
+  }
+  if (existsSync(join(loopDir, "reviewer-audit-checklist.md"))) {
+    manifest.reviewer_audit_checklist_file = join(loopDir, "reviewer-audit-checklist.md")
+  }
+  if (manifest.core_sections && typeof manifest.core_sections === "object") {
+    const coreSections = manifest.core_sections as Record<string, unknown>
+    if (existsSync(join(loopDir, "spec-code-localization.md"))) {
+      coreSections.code_localization = join(loopDir, "spec-code-localization.md")
+    }
+  }
+  if (Array.isArray(manifest.section_files)) {
+    manifest.section_files = manifest.section_files.map((entry) => {
+      if (!entry || typeof entry !== "object") return entry
+      const record = entry as Record<string, unknown>
+      const sourcePath = typeof record.source_path === "string" ? record.source_path : undefined
+      const loopPath = typeof record.loop_path === "string" ? record.loop_path : undefined
+      const fileName = basename(sourcePath ?? loopPath ?? "")
+      if (!fileName) return record
+      return { ...record, loop_path: join(evidenceDir, fileName) }
+    })
+  }
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8")
 }
 
 function copyDirectory(sourceDir: string, targetDir: string): void {
@@ -606,6 +765,30 @@ function writeResumeManifest(input: {
     project_root: input.projectRoot,
     plan_file: input.planFile,
     source_plan_path: join(input.loopDir, "source-plan.md"),
+    copied_evidence_dir: existsSync(join(input.loopDir, "spec-source", "enhanced_requirement_sections"))
+      ? join(input.loopDir, "spec-source", "enhanced_requirement_sections")
+      : undefined,
+    code_localization_file: existsSync(join(input.loopDir, "spec-code-localization.md"))
+      ? join(input.loopDir, "spec-code-localization.md")
+      : undefined,
+    target_surfaces_file: existsSync(join(input.loopDir, "target-surfaces.json"))
+      ? join(input.loopDir, "target-surfaces.json")
+      : undefined,
+    target_surface_contract_file: existsSync(join(input.loopDir, "target-surface-contract.md"))
+      ? join(input.loopDir, "target-surface-contract.md")
+      : undefined,
+    behavioral_contract_file: existsSync(join(input.loopDir, "behavioral-contract.md"))
+      ? join(input.loopDir, "behavioral-contract.md")
+      : undefined,
+    coverage_obligation_file: existsSync(join(input.loopDir, "coverage-obligation.json"))
+      ? join(input.loopDir, "coverage-obligation.json")
+      : undefined,
+    ultimate_goal_checklist_file: existsSync(join(input.loopDir, "ultimate-goal-checklist.json"))
+      ? join(input.loopDir, "ultimate-goal-checklist.json")
+      : undefined,
+    reviewer_audit_checklist_file: existsSync(join(input.loopDir, "reviewer-audit-checklist.md"))
+      ? join(input.loopDir, "reviewer-audit-checklist.md")
+      : undefined,
     resume_mode: "round0",
     resume_source_loop: input.sourceLoopDir,
     resume_source_loop_id: input.sourceLoopID,
@@ -645,7 +828,14 @@ function invokeDriverPlanner(
     planFile: string
     state: PactState
     model: string
+    effort?: ModelReasoningEffort
+    backend: PlannerBackend
+    agent: string
+    opencodeCommand: string
+    spawnSync: SpawnSyncLike
+    shellTrampoline: boolean
     planner?: DriverPlanner
+    openRouterChat?: DriverOpenRouterChat
     repair: boolean
   },
 ): string {
@@ -658,7 +848,111 @@ function invokeDriverPlanner(
       repair: input.repair,
     })
   }
-  return invokeDriverCodexPlanner(prompt, input.projectRoot, input.model)
+  if (input.backend === "openrouter-chat") {
+    return (
+      input.openRouterChat?.(prompt, {
+        projectRoot: input.projectRoot,
+        loopDir: input.loopDir,
+        planFile: input.planFile,
+        state: input.state,
+        model: input.model,
+        repair: input.repair,
+      }) ?? invokeDriverOpenRouterChat(prompt, input.model)
+    )
+  }
+  if (input.backend === "opencode-cli") {
+    return invokeDriverOpenCodeAgent(prompt, {
+      role: "planner",
+      projectRoot: input.projectRoot,
+      command: input.opencodeCommand,
+      agent: input.agent,
+      model: input.model,
+      spawnSync: input.spawnSync,
+      shellTrampoline: input.shellTrampoline,
+    })
+  }
+  if (input.backend === "codex-cli") {
+    return invokeDriverCodexPlanner(prompt, input.projectRoot, input.model, input.effort ?? "medium")
+  }
+  throw new Error(`Unsupported standalone PACT planner backend: ${input.backend}`)
+}
+
+function invokeDriverOpenCodeAgent(
+  prompt: string,
+  input: {
+    role: "planner" | "reviewer"
+    projectRoot: string
+    command: string
+    agent: string
+    model: string
+    spawnSync: SpawnSyncLike
+    shellTrampoline: boolean
+  },
+): string {
+  const args = buildOpencodeRunArgs({ model: input.model, agent: input.agent })
+  const result = spawnOpenCodeRun({
+    spawn: input.spawnSync,
+    command: input.command,
+    args,
+    cwd: input.projectRoot,
+    prompt,
+    shellTrampoline: input.shellTrampoline,
+  })
+  if (result.error) throw result.error
+  if (result.status !== 0) {
+    throw new Error(
+      formatOpenCodeFailure({
+        command: input.command,
+        args,
+        result,
+      }),
+    )
+  }
+  return result.stdout || result.stderr || `OpenCode ${input.role} returned no content.`
+}
+
+function invokeDriverReviewer(
+  prompt: string,
+  input: {
+    projectRoot: string
+    loopDir: string
+    round: number
+    state: PactState
+    reviewer?: DriverReviewer
+    spawnSync: SpawnSyncLike
+    opencodeCommand: string
+    shellTrampoline: boolean
+    reviewerAgent?: string
+    workerModel: string
+  },
+): string {
+  if (input.reviewer) {
+    return input.reviewer(prompt, {
+      projectRoot: input.projectRoot,
+      loopDir: input.loopDir,
+      round: input.round,
+      state: input.state,
+    })
+  }
+  if (input.state.reviewer_backend === "codex-cli") {
+    return invokeDriverCodexReviewer(
+      prompt,
+      input.projectRoot,
+      input.state.reviewer_model ?? "gpt-5.4-mini",
+      input.state.reviewer_effort ?? "medium",
+    )
+  }
+  if (input.state.reviewer_backend === "opencode-cli") {
+    return invokeDriverOpenCodeReviewer(prompt, {
+      projectRoot: input.projectRoot,
+      command: input.opencodeCommand,
+      model: input.state.reviewer_model ?? input.workerModel,
+      agent: input.reviewerAgent,
+      spawnSync: input.spawnSync,
+      shellTrampoline: input.shellTrampoline,
+    })
+  }
+  throw new Error(`Unsupported PACT driver reviewer backend: ${input.state.reviewer_backend}`)
 }
 
 function recordDriverPlannerFailure(input: {
@@ -746,8 +1040,13 @@ function finalizeRoundAfterRunExit(input: {
   loopDir: string
   round: number
   reviewer?: DriverReviewer
+  spawnSync: SpawnSyncLike
+  opencodeCommand: string
+  reviewerAgent: string
+  shellTrampoline: boolean
   agent?: string
   model: string
+  harness?: PactHarness
 }): PactState {
   const initialState = readState(input.loopDir)
   if (initialState.status !== "running") return initialState
@@ -859,6 +1158,7 @@ function finalizeRoundAfterRunExit(input: {
     evalPatchPath: patchArtifact.eval_patch.path,
     patchArtifactPath: paths.patchArtifact,
     verificationPath: verification ? paths.verification : undefined,
+    harness: input.harness,
     reviewKind:
       initialState.phase === "full_alignment"
         ? "full_alignment"
@@ -870,13 +1170,18 @@ function finalizeRoundAfterRunExit(input: {
 
   let reviewText: string
   try {
-    reviewText =
-      input.reviewer?.(reviewPrompt, {
-        projectRoot: input.projectRoot,
-        loopDir: input.loopDir,
-        round: input.round,
-        state: initialState,
-      }) ?? invokeDriverCodexReviewer(reviewPrompt, input.projectRoot, initialState.reviewer_model ?? "gpt-5.4-mini")
+    reviewText = invokeDriverReviewer(reviewPrompt, {
+      projectRoot: input.projectRoot,
+      loopDir: input.loopDir,
+      round: input.round,
+      state: initialState,
+      reviewer: input.reviewer,
+      spawnSync: input.spawnSync,
+      opencodeCommand: input.opencodeCommand,
+      shellTrampoline: input.shellTrampoline,
+      reviewerAgent: input.reviewerAgent,
+      workerModel: input.model,
+    })
   } catch (err) {
     const decision = recordFailedReviewDecision({
       loopDir: input.loopDir,
@@ -1058,6 +1363,7 @@ function finalizeRoundAfterRunExit(input: {
     reviewedRound: input.round,
     agent: input.agent,
     model: input.model,
+    harness: input.harness,
   })
   return readState(input.loopDir)
 }
@@ -1128,6 +1434,7 @@ function writeNextPromptAfterDriverRound(input: {
   reviewedRound: number
   agent?: string
   model: string
+  harness?: PactHarness
 }): void {
   if (input.state.status !== "running") return
   const workerPath = workerPathRenderer(input.projectRoot)
@@ -1136,7 +1443,13 @@ function writeNextPromptAfterDriverRound(input: {
   const goalTrackerPath = join(input.loopDir, "goal-tracker.md")
   let prompt: string | undefined
   if (input.state.phase === "finalize") {
-    prompt = buildFinalizePrompt({ loopDir: input.loopDir, round: input.state.current_round, goalTrackerPath, workerPath })
+    prompt = buildFinalizePrompt({
+      loopDir: input.loopDir,
+      round: input.state.current_round,
+      goalTrackerPath,
+      workerPath,
+      harness: input.harness,
+    })
   } else if (input.state.phase === "review") {
     prompt = buildReviewPhasePrompt({
       loopDir: input.loopDir,
@@ -1144,6 +1457,7 @@ function writeNextPromptAfterDriverRound(input: {
       feedbackPath,
       goalTrackerPath,
       workerPath,
+      harness: input.harness,
     })
   } else if (input.state.phase === "implementation") {
     prompt = buildContinuationPrompt({
@@ -1153,6 +1467,7 @@ function writeNextPromptAfterDriverRound(input: {
       goalTrackerPath,
       continuationPackagePath: artifactPaths(input.loopDir, input.reviewedRound).continuationPackage,
       workerPath,
+      harness: input.harness,
     })
   }
   if (!prompt) return
@@ -1649,7 +1964,12 @@ function finalizeDriverEvidence(loopDir: string, round: number): void {
   })
 }
 
-function invokeDriverCodexPlanner(prompt: string, projectRoot: string, model: string): string {
+function invokeDriverCodexPlanner(
+  prompt: string,
+  projectRoot: string,
+  model: string,
+  effort: ModelReasoningEffort = "medium",
+): string {
   const args = [
     "exec",
     "--ignore-user-config",
@@ -1659,7 +1979,7 @@ function invokeDriverCodexPlanner(prompt: string, projectRoot: string, model: st
     "-m",
     model,
     "-c",
-    'model_reasoning_effort="medium"',
+    `model_reasoning_effort="${effort}"`,
     "-C",
     projectRoot,
     "-",
@@ -1678,7 +1998,74 @@ function invokeDriverCodexPlanner(prompt: string, projectRoot: string, model: st
   return result.stdout || result.stderr || "Codex planner returned no content."
 }
 
-function invokeDriverCodexReviewer(prompt: string, projectRoot: string, model: string): string {
+function invokeDriverOpenRouterChat(prompt: string, model: string): string {
+  if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is required for openrouter-chat planner")
+  const baseURL = (env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1").replace(/\/+$/, "")
+  const timeout = Number(env.PACT_OPENROUTER_TIMEOUT_MS ?? 600000)
+  const python = `
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+request = json.loads(sys.stdin.read())
+payload = json.dumps({
+  "model": request["model"],
+  "messages": [{"role": "user", "content": request["prompt"]}],
+}).encode("utf-8")
+http_request = urllib.request.Request(
+  request["base_url"].rstrip("/") + "/chat/completions",
+  data=payload,
+  headers={
+    "Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"],
+    "Content-Type": "application/json",
+  },
+  method="POST",
+)
+try:
+  with urllib.request.urlopen(http_request, timeout=request["timeout_seconds"]) as response:
+    sys.stdout.write(response.read().decode("utf-8"))
+except urllib.error.HTTPError as error:
+  sys.stderr.write(error.read().decode("utf-8", "replace"))
+  raise SystemExit(1)
+`
+  const result = nodeSpawnSync("python3", ["-c", python], {
+    cwd: cwd(),
+    input: JSON.stringify({ base_url: baseURL, model, prompt, timeout_seconds: Math.ceil(timeout / 1000) }),
+    encoding: "utf-8",
+    maxBuffer: 10 * 1024 * 1024,
+    timeout,
+    env: process.env,
+  })
+  if (result.error) throw result.error
+  if (result.status !== 0) {
+    throw new Error(`OpenRouter planner failed with status ${result.status}: ${redactText(String(result.stderr ?? ""))}`)
+  }
+  const raw = String(result.stdout ?? "")
+  try {
+    const parsed = JSON.parse(raw)
+    const content = parsed?.choices?.[0]?.message?.content
+    if (typeof content === "string" && content.trim()) return content
+    if (Array.isArray(content)) {
+      const text = content
+        .map((part) => (typeof part?.text === "string" ? part.text : typeof part === "string" ? part : ""))
+        .join("\n")
+        .trim()
+      if (text) return text
+    }
+  } catch {
+    // Fall through to a clear failure below.
+  }
+  throw new Error("OpenRouter planner returned no message content.")
+}
+
+function invokeDriverCodexReviewer(
+  prompt: string,
+  projectRoot: string,
+  model: string,
+  effort: ModelReasoningEffort = "medium",
+): string {
   const args = [
     "exec",
     "--ignore-user-config",
@@ -1688,7 +2075,7 @@ function invokeDriverCodexReviewer(prompt: string, projectRoot: string, model: s
     "-m",
     model,
     "-c",
-    'model_reasoning_effort="medium"',
+    `model_reasoning_effort="${effort}"`,
     "-C",
     projectRoot,
     "-",
@@ -1705,6 +2092,48 @@ function invokeDriverCodexReviewer(prompt: string, projectRoot: string, model: s
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error(`Codex reviewer failed with status ${result.status}: ${result.stderr}`)
   return result.stdout || result.stderr || "Codex reviewer returned no content."
+}
+
+function invokeDriverOpenCodeReviewer(
+  prompt: string,
+  input: {
+    projectRoot: string
+    command: string
+    model: string
+    agent?: string
+    spawnSync: SpawnSyncLike
+    shellTrampoline: boolean
+  },
+): string {
+  const args = buildOpencodeRunArgs({ model: input.model, agent: input.agent })
+  const result = spawnOpenCodeRun({
+    spawn: input.spawnSync,
+    command: input.command,
+    args,
+    cwd: input.projectRoot,
+    prompt,
+    shellTrampoline: input.shellTrampoline,
+  })
+  if (result.error) throw result.error
+  if (result.status !== 0) {
+    throw new Error(
+      truncateLog(
+        redactText(
+          [
+            "OpenCode reviewer invocation failed.",
+            `command: ${input.command} ${args.join(" ")}`,
+            `status: ${result.status ?? "unknown"}`,
+            result.stdout ? `stdout:\n${result.stdout}` : undefined,
+            result.stderr ? `stderr:\n${result.stderr}` : undefined,
+          ]
+            .filter((line): line is string => Boolean(line))
+            .join("\n"),
+        ),
+        6000,
+      ),
+    )
+  }
+  return result.stdout || result.stderr || "OpenCode reviewer returned no content."
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1776,6 +2205,8 @@ function buildWorkerInvocation(input: {
     "run",
     "--rm",
     "-i",
+    "--name",
+    dockerWorkerContainerName(),
     ...dockerResourceArgs(),
     ...dockerBlackholeHostArgs(),
     "-e",
@@ -1806,7 +2237,14 @@ function dockerResourceArgs(): string[] {
 
 function dockerWorkerEnvArgs(input: { workerPluginMount?: string; workerContainerPluginMount: string }): string[] {
   const args: string[] = []
-  for (const name of ["ZAI_API_KEY", "ZAI_API_BASE", "OPENCODE_CONFIG", "MSWEA_MODEL_NAME"]) {
+  for (const name of [
+    "ZAI_API_KEY",
+    "ZAI_API_BASE",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+    "OPENCODE_CONFIG",
+    "MSWEA_MODEL_NAME",
+  ]) {
     if (env[name]) args.push("-e", name)
   }
   const config = containerOpenCodeConfig(input)
@@ -1814,6 +2252,11 @@ function dockerWorkerEnvArgs(input: { workerPluginMount?: string; workerContaine
   const pluginPath = containerPluginPath(input)
   if (pluginPath) args.push("-e", `PACT_PLUGIN_PATH=${pluginPath}`)
   return args
+}
+
+function dockerWorkerContainerName(): string {
+  const suffix = Math.random().toString(36).slice(2, 10)
+  return `pact-worker-${process.pid}-${Date.now()}-${suffix}`
 }
 
 function containerOpenCodeConfig(input: {
@@ -1876,12 +2319,169 @@ function buildOpencodeRunArgs(input: {
   return args
 }
 
+function spawnOpenCodeRun(input: {
+  spawn: SpawnSyncLike
+  command: string
+  args: string[]
+  cwd: string
+  prompt: string
+  shellTrampoline?: boolean
+}): SpawnResult {
+  const command = input.shellTrampoline ? "/bin/sh" : input.command
+  const args = input.shellTrampoline
+    ? ["-c", 'exec "$@"', "opencode-run", input.command, ...input.args, input.prompt]
+    : [...input.args, input.prompt]
+  return input.spawn(command, args, {
+    cwd: input.cwd,
+    input: "",
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+    maxBuffer: OPENCODE_RUN_MAX_BUFFER,
+    timeout: configuredOpenCodeRunTimeoutMs(),
+    env: process.env,
+  })
+}
+
+function configuredOpenCodeRunTimeoutMs(): number | undefined {
+  const raw = env.PACT_OPENCODE_RUN_TIMEOUT_MS ?? env.PACT_OPENCODE_TIMEOUT_MS
+  if (!raw) return undefined
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined
+  return parsed
+}
+
 function defaultSpawnSync(
   command: string,
   args: string[],
-  options: { cwd: string; input: string; encoding: "utf-8"; stdio: Array<"inherit" | "pipe">; maxBuffer: number },
+  options: SpawnSyncOptions,
 ): SpawnResult {
+  if (options.timeout && options.timeout > 0) {
+    return spawnSyncWithPythonTimeout(command, args, options)
+  }
   return nodeSpawnSync(command, args, options)
+}
+
+function spawnSyncWithPythonTimeout(command: string, args: string[], options: SpawnSyncOptions): SpawnResult {
+  const dockerName = dockerContainerNameFromArgs(args)
+  const request = {
+    command,
+    args,
+    cwd: options.cwd,
+    input: options.input ?? "",
+    timeout_ms: options.timeout ?? 0,
+    env: options.env ?? process.env,
+    docker_name: dockerName,
+  }
+  const script = String.raw`
+import json, os, signal, subprocess, sys, time
+
+request = json.loads(sys.stdin.read())
+command = request["command"]
+args = request["args"]
+timeout = max(float(request.get("timeout_ms") or 0) / 1000.0, 0.001)
+env = {k: str(v) for k, v in (request.get("env") or {}).items() if v is not None}
+proc = subprocess.Popen(
+    [command] + args,
+    cwd=request.get("cwd") or None,
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+    env=env,
+    start_new_session=True,
+)
+timed_out = False
+try:
+    stdout, stderr = proc.communicate(request.get("input") or "", timeout=timeout)
+except subprocess.TimeoutExpired:
+    timed_out = True
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except Exception:
+        pass
+    try:
+        stdout, stderr = proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except Exception:
+            pass
+        stdout, stderr = proc.communicate()
+    docker_name = request.get("docker_name")
+    if docker_name:
+        subprocess.run(["docker", "rm", "-f", docker_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+print(json.dumps({
+    "status": proc.returncode,
+    "stdout": stdout,
+    "stderr": stderr,
+    "timed_out": timed_out,
+}))
+`
+  const wrapper = nodeSpawnSync("python3", ["-c", script], {
+    cwd: options.cwd,
+    input: JSON.stringify(request),
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+    maxBuffer: Math.max(options.maxBuffer * 2, 1024 * 1024),
+    env: process.env,
+  })
+  if (wrapper.error) {
+    cleanupTimedOutDockerContainer(command, dockerName)
+    return { status: null, stdout: wrapper.stdout, stderr: wrapper.stderr, error: wrapper.error }
+  }
+  if (wrapper.status !== 0) {
+    cleanupTimedOutDockerContainer(command, dockerName)
+    return {
+      status: wrapper.status,
+      stdout: wrapper.stdout,
+      stderr: wrapper.stderr,
+      error: new Error(`timeout wrapper failed with status ${wrapper.status}`),
+    }
+  }
+  try {
+    const parsed = JSON.parse(wrapper.stdout || "{}") as {
+      status?: number | null
+      stdout?: string
+      stderr?: string
+      timed_out?: boolean
+    }
+    if (parsed.timed_out || parsed.status === null || (typeof parsed.status === "number" && parsed.status !== 0)) {
+      cleanupTimedOutDockerContainer(command, dockerName)
+    }
+    return {
+      status: parsed.status ?? null,
+      stdout: parsed.stdout ?? "",
+      stderr: parsed.stderr ?? "",
+      error: parsed.timed_out ? new Error(`OpenCode invocation timed out after ${options.timeout}ms`) : undefined,
+    }
+  } catch (error) {
+    return {
+      status: null,
+      stdout: wrapper.stdout,
+      stderr: wrapper.stderr,
+      error: error instanceof Error ? error : new Error(String(error)),
+    }
+  }
+}
+
+function cleanupTimedOutDockerContainer(command: string, dockerName?: string): void {
+  if (!dockerName) return
+  try {
+    nodeSpawnSync(command, ["rm", "-f", dockerName], {
+      encoding: "utf-8",
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024,
+    })
+  } catch {
+    // Best-effort cleanup; the timeout error is reported by the worker result.
+  }
+}
+
+function dockerContainerNameFromArgs(args: string[]): string | undefined {
+  const index = args.indexOf("--name")
+  const value = index >= 0 ? args[index + 1] : undefined
+  return value && !value.startsWith("-") ? value : undefined
 }
 
 export function cliArgs(raw: string[]): {
@@ -1893,20 +2493,29 @@ export function cliArgs(raw: string[]): {
   dockerCommand?: string
   containerOpencodeCommand?: string
   agent?: string
+  plannerAgent?: string
+  reviewerAgent?: string
+  workerAgent?: string
   variant?: string
   workerRunner?: WorkerRunner
   workerContainerImage?: string
   workerContainerWorkspace?: string
   workerPluginMount?: string
   workerContainerPluginMount?: string
+  plannerBackend?: PlannerBackend
   plannerModel?: string
+  plannerEffort?: ModelReasoningEffort
+  reviewerBackend?: ReviewerBackend
   reviewerModel?: string
+  reviewerEffort?: ModelReasoningEffort
+  reviewerAgent?: string
   fullAlignmentInterval?: number
   sessionStrategy?: SessionStrategy
   verificationCommand?: string
   verificationTimeoutMs?: number
   resumeLoopDir?: string
   resumeMode?: ResumeMode
+  harnessDir?: string
 } {
   const args = [...raw]
   const parsed: Record<string, string | undefined> = {}
@@ -1926,22 +2535,60 @@ export function cliArgs(raw: string[]): {
     opencodeCommand: parsed["opencode-command"],
     dockerCommand: parsed["docker-command"],
     containerOpencodeCommand: parsed["container-opencode-command"],
-    agent: parsed.agent,
+    agent: parsed["worker-agent"] ?? parsed.agent,
+    plannerAgent: parsed["planner-agent"],
+    reviewerAgent: parsed["reviewer-agent"],
+    workerAgent: parsed["worker-agent"] ?? parsed.agent,
     variant: parsed.variant,
     workerRunner: (parsed["worker-runner"] ?? env.PACT_WORKER_RUNNER) === "docker" ? "docker" : "host",
     workerContainerImage: parsed["worker-container-image"] ?? env.LOLBENCH_AGENT_IMAGE_TAG,
     workerContainerWorkspace: parsed["worker-container-workspace"],
     workerPluginMount: parsed["worker-plugin-mount"],
     workerContainerPluginMount: parsed["worker-container-plugin-mount"],
+    plannerBackend: parsePlannerBackend(parsed["planner-backend"] ?? parsed.planner),
     plannerModel: parsed["planner-model"],
+    plannerEffort: parseModelReasoningEffort(parsed["planner-effort"]),
+    reviewerBackend: parseReviewerBackend(parsed["reviewer-backend"] ?? parsed.reviewer),
     reviewerModel: parsed["reviewer-model"],
+    reviewerEffort: parseModelReasoningEffort(parsed["reviewer-effort"]),
+    reviewerAgent: parsed["reviewer-agent"],
     verificationCommand: defaultVerificationCommand(parsed),
     verificationTimeoutMs: parsed["verification-timeout-ms"] ? Number(parsed["verification-timeout-ms"]) : undefined,
     resumeLoopDir: parsed["resume-loop"] ?? env.PACT_RESUME_LOOP_DIR,
     resumeMode: parseResumeMode(parsed["resume-mode"] ?? env.PACT_RESUME_MODE),
+    harnessDir: parsed["harness-dir"] ?? env.PACT_HARNESS_DIR,
     sessionStrategy: parsed["session-strategy"] === "same-session" ? "same-session" : "new-per-round",
     fullAlignmentInterval: parsed["full-alignment-interval"] ? Number(parsed["full-alignment-interval"]) : undefined,
   }
+}
+
+function parsePlannerBackend(value: string | undefined): PlannerBackend | undefined {
+  if (value === undefined || value === "") return undefined
+  if (
+    value === "codex-cli" ||
+    value === "opencode-agent" ||
+    value === "opencode-cli" ||
+    value === "openrouter-chat" ||
+    value === "spec-import"
+  ) {
+    return value
+  }
+  throw new Error(`Unsupported PACT planner backend: ${value}`)
+}
+
+function parseReviewerBackend(value: string | undefined): ReviewerBackend | undefined {
+  if (value === undefined || value === "") return undefined
+  if (value === "codex-cli" || value === "opencode-agent" || value === "opencode-cli") return value
+  if (value === "openrouter-chat") {
+    throw new Error("Unsupported PACT reviewer backend: openrouter-chat. Use opencode-cli or codex-cli.")
+  }
+  throw new Error(`Unsupported PACT reviewer backend: ${value}`)
+}
+
+function parseModelReasoningEffort(value: string | undefined): ModelReasoningEffort | undefined {
+  if (value === undefined || value === "") return undefined
+  if (value === "xhigh" || value === "high" || value === "medium" || value === "low") return value
+  throw new Error(`Unsupported model reasoning effort: ${value}`)
 }
 
 function parseResumeMode(value: string | undefined): ResumeMode | undefined {
