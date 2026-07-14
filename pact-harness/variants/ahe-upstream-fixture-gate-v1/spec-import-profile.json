@@ -1,0 +1,64 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "ahe-upstream-fixture-gate-v1",
+  "mode": "pact-spec-import",
+  "optimization_surface": "workflow/schema",
+  "candidate_scope": [
+    "manifest.json",
+    "templates/*.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json"
+  ],
+  "protected_scope": [
+    ".opencode/plugins/pact*.ts",
+    ".opencode/plugins/pact/*.ts",
+    "runner code",
+    "benchmark source",
+    "TypeScript harness runtime"
+  ],
+  "focus": [
+    "upstream-fixture-materiality-gate",
+    "valid-and-invalid-fixture-parity",
+    "committed-equivalent-fixture-rationale",
+    "runnable-probe-artifacts",
+    "public-test-patch-oracle-when-legally-available",
+    "description-only-claims-rejection",
+    "toml-valid-fixture-acceptance",
+    "toml-invalid-fixture-exception-wrapping",
+    "toml-exact-error-message-line-column-character-formatting",
+    "toml-decode-error-constructor-module-behavior",
+    "parse-float-invalid-return-behavior"
+  ],
+  "worker_summary_requirements": [
+    "Summary Heartbeat",
+    "Round Budget",
+    "Requirement Source Ledger",
+    "Parser/File-Format Fixture Gate",
+    "Fixture Gate Matrix",
+    "Failure Signature Gate",
+    "Evidence Provenance Grade Ledger",
+    "Verification Debt Ledger",
+    "Goal Tracker Update Request"
+  ],
+  "review_requirements": [
+    "reject missing or stale summary heartbeat",
+    "reject parser/file-format completion without materially present valid and invalid fixture evidence",
+    "reject fixture claims that cite only prose, source inspection, or manual non-reproducible probes",
+    "require committed equivalent fixtures to include artifact paths, equivalence rationale, and runnable probes",
+    "allow public test.patch evidence only when legally available in the PACT artifact set",
+    "reject optionalizing exact error behavior for stdlib-compatible parser APIs without source evidence",
+    "require TOML valid fixture acceptance evidence when TOML parsing is in scope",
+    "require invalid fixture TOMLDecodeError wrapping evidence when TOML parsing is in scope",
+    "require exact error message, line, column, end-of-document, and invalid-character formatting evidence when errors are public",
+    "require TOMLDecodeError constructor and __module__ evidence when the exception is exported",
+    "require invalid parse_float return ValueError evidence when parse_float is supported"
+  ],
+  "disallowed_inputs": [
+    "patch_final.diff",
+    "solution.patch",
+    "hidden eval output",
+    "F2P/P2P details",
+    "code-host lookup results",
+    "hidden or unavailable test.patch contents"
+  ]
+}

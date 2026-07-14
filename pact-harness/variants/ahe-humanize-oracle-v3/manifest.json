@@ -1,0 +1,26 @@
+{
+  "schema": "pact-harness/v1",
+  "id": "ahe-humanize-oracle-v3",
+  "name": "AHE Humanize Oracle V3",
+  "description": "PACT harness variant that adds Humanize-style summary heartbeats and changed-surface-to-oracle mapping on top of AHE evidence ledgers, so workers stop before timeout and reviewers require tests/probes implied by the actual patch surface.",
+  "templates": {
+    "planner": "templates/planner.md",
+    "initial_worker": "templates/initial-worker.md",
+    "continuation_worker": "templates/continuation-worker.md",
+    "review": "templates/review.md",
+    "review_phase": "templates/review-phase.md",
+    "finalize": "templates/finalize.md"
+  },
+  "goal_tracker_schema": "goal-tracker-schema.md",
+  "spec_import_profile": "spec-import-profile.json",
+  "predicted_fixes": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "risk_cases": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ]
+}

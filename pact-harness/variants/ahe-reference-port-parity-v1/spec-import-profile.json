@@ -1,0 +1,53 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "ahe-reference-port-parity-v1",
+  "mode": "pact-spec-import",
+  "focus": [
+    "reference-port-parity",
+    "tomli-compatible-parser-behavior",
+    "reference-parity-ledger",
+    "valid-fixture-acceptance",
+    "invalid-fixture-rejection",
+    "exact-error-message-location",
+    "parse-float-invalid-return",
+    "datetime-date-error-wrapping",
+    "tomldecodeerror-constructor-module",
+    "committed-fixture-or-unittest-evidence"
+  ],
+  "worker_summary_requirements": [
+    "Summary Heartbeat",
+    "Round Budget",
+    "Reference-Port Strategy",
+    "Requirement Source Ledger",
+    "Reference Parity Ledger",
+    "Impact Oracle Matrix linked to Reference Parity Ledger rows",
+    "Evidence Provenance Grade Ledger",
+    "Verification Debt Ledger",
+    "Surface Equivalence Matrix when multiple implementations or integration points exist",
+    "Deferred or Rejected Work",
+    "Goal Tracker Update Request"
+  ],
+  "review_requirements": [
+    "reject missing or stale summary heartbeat",
+    "reject parser or file-format completion without a Reference Parity Ledger",
+    "require upstream-compatible or tomli-compatible behavior preference for parser tasks",
+    "require valid fixture acceptance parity evidence",
+    "require invalid fixture rejection parity evidence",
+    "require exact error message and location parity evidence",
+    "require parse_float invalid return ValueError evidence",
+    "require invalid datetime/date wrapping evidence",
+    "require TOMLDecodeError constructor and module evidence",
+    "require committed fixtures, direct unittest probes, or documented reference comparison for every required parser parity row",
+    "treat synthetic local parser tests, manual probes, and source inspection as partial unless tied to reference comparison",
+    "reject AC narrowing or optionalizing reference parity without evidence-backed non-applicability"
+  ],
+  "disallowed_inputs": [
+    "patch_final.diff",
+    "solution.patch",
+    "test.patch",
+    "build trajectories",
+    "hidden eval output",
+    "F2P/P2P details",
+    "code-host lookup results"
+  ]
+}

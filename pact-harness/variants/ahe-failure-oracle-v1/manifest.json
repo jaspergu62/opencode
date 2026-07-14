@@ -1,0 +1,26 @@
+{
+  "schema": "pact-harness/v1",
+  "id": "ahe-failure-oracle-v1",
+  "name": "AHE Failure Oracle V1",
+  "description": "PACT harness variant that turns observed hidden failures into explicit oracle matrices, early summary heartbeats, bounded round budgets, and evidence provenance gates for high-risk surfaces.",
+  "templates": {
+    "planner": "templates/planner.md",
+    "initial_worker": "templates/initial-worker.md",
+    "continuation_worker": "templates/continuation-worker.md",
+    "review": "templates/review.md",
+    "review_phase": "templates/review-phase.md",
+    "finalize": "templates/finalize.md"
+  },
+  "goal_tracker_schema": "goal-tracker-schema.md",
+  "spec_import_profile": "spec-import-profile.json",
+  "predicted_fixes": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "risk_cases": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ]
+}

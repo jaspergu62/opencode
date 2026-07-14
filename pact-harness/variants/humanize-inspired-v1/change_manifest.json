@@ -1,0 +1,27 @@
+{
+  "schema": "pact-harness-change/v1",
+  "variant_id": "humanize-inspired-v1",
+  "changed_harness_files": [
+    "manifest.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json",
+    "change_manifest.json"
+  ],
+  "predicted_fixes": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "risk_cases": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "rationale": "Adds a prompt-only Humanize/RLCR-inspired overlay that makes generated artifacts the source of truth, requires independent alignment review, records compact BitLesson deltas, applies a stagnation circuit breaker, and preserves completion discipline without treating harness artifacts as solution changes."
+}

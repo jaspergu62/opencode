@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "id": "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+      "resume_loop_dir": "/Users/gujiazhen/Documents/cc_codes/outputs/lolbench_pact_round0_imports_v14_opencode_best/CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909/spec-import-round0",
+      "max_rounds": 1,
+      "target_suites": ["orig"],
+      "tags": ["cpython", "stdlib", "timezone", "pep615"]
+    },
+    {
+      "id": "CPython_PEP-646_Variadic-Generics_PR-31018",
+      "resume_loop_dir": "/Users/gujiazhen/Documents/cc_codes/outputs/lolbench_pact_round0_imports_v14_opencode_best/CPython_PEP-646_Variadic-Generics_PR-31018/spec-import-round0",
+      "max_rounds": 1,
+      "target_suites": ["orig"],
+      "tags": ["cpython", "typing", "generics", "pep646"]
+    },
+    {
+      "id": "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498",
+      "resume_loop_dir": "/Users/gujiazhen/Documents/cc_codes/outputs/lolbench_pact_round0_imports_v14_opencode_best/CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498/spec-import-round0",
+      "max_rounds": 1,
+      "target_suites": ["orig"],
+      "tags": ["cpython", "stdlib", "toml", "pep680"]
+    }
+  ]
+}

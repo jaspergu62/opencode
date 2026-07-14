@@ -1,0 +1,22 @@
+{
+  "schema": "pact-harness/v1",
+  "id": "ahe-reference-port-parity-v1",
+  "name": "AHE Reference Port Parity V1",
+  "description": "PACT harness variant that forces parser and file-format tasks through a reference-port parity workflow. Workers prefer upstream-compatible or tomli-compatible behavior, maintain a Reference Parity Ledger, and reviewers require fixture, unittest, or documented reference-comparison evidence before completion.",
+  "templates": {
+    "planner": "templates/planner.md",
+    "initial_worker": "templates/initial-worker.md",
+    "continuation_worker": "templates/continuation-worker.md",
+    "review": "templates/review.md",
+    "review_phase": "templates/review-phase.md",
+    "finalize": "templates/finalize.md"
+  },
+  "goal_tracker_schema": "goal-tracker-schema.md",
+  "spec_import_profile": "spec-import-profile.json",
+  "predicted_fixes": [
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "risk_cases": [
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ]
+}

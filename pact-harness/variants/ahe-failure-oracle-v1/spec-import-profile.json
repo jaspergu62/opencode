@@ -1,0 +1,47 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "ahe-failure-oracle-v1",
+  "mode": "pact-spec-import",
+  "focus": [
+    "summary-heartbeat",
+    "bounded-round-budget",
+    "impact-oracle-matrix",
+    "evidence-provenance-grades",
+    "zoneinfo-oracle-defaults",
+    "grammar-compiler-ast-unparse-oracle-defaults",
+    "toml-parser-upstream-oracle-defaults",
+    "failure-signature-finalization"
+  ],
+  "worker_summary_requirements": [
+    "Summary Heartbeat",
+    "Round Budget",
+    "Requirement Source Ledger",
+    "Impact Oracle Matrix",
+    "Evidence Provenance Grade Ledger",
+    "Implementation Surface Inventory",
+    "Verification Debt Ledger",
+    "Surface Equivalence Matrix when multiple implementations or integration points exist",
+    "Deferred or Rejected Work",
+    "Goal Tracker Update Request"
+  ],
+  "review_requirements": [
+    "reject missing or stale summary heartbeat",
+    "reject unbounded broad subsystem rounds without staged checkpoints",
+    "audit the Impact Oracle Matrix before accepting completion",
+    "reject missing required oracle families for high-risk changed surfaces",
+    "treat manual probes and source inspection as partial evidence only",
+    "treat synthetic local tests as partial for high-risk parser, grammar, compiler, timezone, serialization, and stdlib integration surfaces unless equivalence is justified",
+    "require upstream or equivalent fixture provenance for TOML/parser/file-format imports when available",
+    "require zoneinfo weird/TZ-string/fold/fromutc/cache/pickle/path/C-Python parity evidence when relevant",
+    "require grammar/parser/AST/runtime/future/type-hints/unparse/negative syntax evidence when relevant"
+  ],
+  "disallowed_inputs": [
+    "patch_final.diff",
+    "solution.patch",
+    "test.patch",
+    "build trajectories",
+    "hidden eval output",
+    "F2P/P2P details",
+    "code-host lookup results"
+  ]
+}

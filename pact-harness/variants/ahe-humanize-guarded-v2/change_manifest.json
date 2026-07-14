@@ -1,0 +1,53 @@
+{
+  "schema": "pact-harness-change/v1",
+  "variant_id": "ahe-humanize-guarded-v2",
+  "summary": "Refreshes the AHE evidence-ledger variant with Humanize-derived guarded completion rules observed in the PEP615/646/680 max3 traces.",
+  "meaningful_difference": "Compared with ahe-evidence-ledger-v1, this variant makes completion harder for high-risk work. It classifies ACs by requirement source, forces workers to build an implementation surface inventory before narrowing scope, blocks required deferrals, treats manual-only evidence as partial, requires compliance fixtures for parsers/formats, requires cross-surface equivalence for duplicate implementations, prevents spec-mentioned duplicate surfaces from being dismissed merely because the worker skipped them, requires grammar/compiler coverage across AST/runtime/future/negative syntax surfaces, detects stale summaries, and lets reviewers invalidate over-broad derived ACs instead of chasing scope drift.",
+  "changed_files": [
+    "manifest.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json"
+  ],
+  "changed_harness_files": [
+    "manifest.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json",
+    "change_manifest.json"
+  ],
+  "predicted_fixes": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "risk_cases": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "predicted_case_effects": [
+    {
+      "case_id": "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498",
+      "prediction": "Reviewer should block completion until fixture-driven TOML compliance and error tests are present or explicitly proven non-applicable."
+    },
+    {
+      "case_id": "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+      "prediction": "Worker should identify C accelerator, pure-Python fallback, metadata, import, cache, and runtime surfaces before scope narrowing; reviewer should require equivalence evidence for timezone transition parsing and related edge behavior."
+    },
+    {
+      "case_id": "CPython_PEP-646_Variadic-Generics_PR-31018",
+      "prediction": "Reviewer should require automated grammar/AST/future-annotations regressions while preventing over-broad derived ACs from expanding the original task."
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "ahe-humanize-oracle-v3",
+  "mode": "pact-spec-import",
+  "focus": [
+    "requirement-source-classification",
+    "evidence-grade-gates",
+    "deferred-work-is-incomplete",
+    "manual-evidence-is-partial",
+    "multi-surface-equivalence",
+    "artifact-first-review",
+    "impact-oracle-matrix",
+    "summary-heartbeat",
+    "bounded-continuation"
+  ],
+  "worker_summary_requirements": [
+    "Requirement Source Ledger",
+    "Impact Oracle Matrix",
+    "Verification Plan and Evidence Grade",
+    "Round Budget / Summary Heartbeat status",
+    "Surface Equivalence Matrix when multiple implementations or integration points exist",
+    "Deferred or rejected work table",
+    "Evidence Ledger Update",
+    "Risk Ledger Update"
+  ],
+  "review_requirements": [
+    "reject completion when required deferred work remains",
+    "reject completion when high-risk ACs have only manual evidence",
+    "reject AC narrowing unless out-of-scope evidence is explicit",
+    "mark over-broad derived ACs invalidated_out_of_scope instead of forcing scope expansion",
+    "require compliance-style fixtures for parser and format implementations",
+    "require equivalence evidence across C/Python/runtime integration surfaces",
+    "reject missing or stale worker summaries",
+    "require changed-surface oracle coverage before completion",
+    "treat broad one-round contracts with hidden open required surfaces as incomplete"
+  ],
+  "disallowed_inputs": [
+    "patch_final.diff",
+    "solution.patch",
+    "test.patch",
+    "build trajectories",
+    "hidden eval output",
+    "F2P/P2P details",
+    "code-host lookup results"
+  ]
+}

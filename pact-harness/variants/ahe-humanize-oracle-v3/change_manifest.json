@@ -1,0 +1,53 @@
+{
+  "schema": "pact-harness-change/v1",
+  "variant_id": "ahe-humanize-oracle-v3",
+  "summary": "Adds a changed-surface Impact Oracle Matrix and Humanize-style summary heartbeat/stop-budget rules after analyzing PEP615, PEP646, and PEP680 traces.",
+  "meaningful_difference": "Compared with ahe-humanize-guarded-v2, this variant makes the worker choose bounded vertical slices, maintain a live summary heartbeat, and map every changed surface to the likely oracle it must satisfy before claiming completion. Reviewer/finalize gates now reject missing summaries, over-broad one-round contracts for large cases, and completion claims that omit oracle families implied by changed files, such as test_future/test_unparse for grammar/annotation changes, zoneinfo weird/TZStr/fold/fromutc/cache surfaces, and parser fixture/error corpora for new file-format modules.",
+  "changed_files": [
+    "manifest.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json"
+  ],
+  "changed_harness_files": [
+    "manifest.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json",
+    "change_manifest.json"
+  ],
+  "predicted_fixes": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "risk_cases": [
+    "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+    "CPython_PEP-646_Variadic-Generics_PR-31018",
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "predicted_case_effects": [
+    {
+      "case_id": "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498",
+      "prediction": "Worker should not spend the whole round without a summary heartbeat. Reviewer should block missing-summary/stub rounds and require parser fixture/error coverage or explicit non-applicability before completion."
+    },
+    {
+      "case_id": "CPython_PEP-615_Support-for-the-IANA-Time-Zone-Database-in-the-Standard-Library_PR-19909",
+      "prediction": "Worker should choose a bounded, importable zoneinfo slice and preserve summary artifacts before long probes. Reviewer should require zoneinfo oracle families such as weird zones, TZ strings, fold/fromutc, cache, pickle, path traversal, and duplicate-surface parity when claiming completion."
+    },
+    {
+      "case_id": "CPython_PEP-646_Variadic-Generics_PR-31018",
+      "prediction": "Reviewer should require impact oracles for grammar/compiler/AST/unparse changes, including future annotations and cosmetic unparse/slice roundtrip surfaces, rather than accepting only worker-chosen typing tests."
+    }
+  ]
+}

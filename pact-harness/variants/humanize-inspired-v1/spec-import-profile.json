@@ -1,0 +1,27 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "humanize-inspired-v1",
+  "planner_mode": "preserve_imported_plan",
+  "source_of_truth": [
+    "plan",
+    "todo",
+    "goal_tracker",
+    "summary",
+    "review_feedback",
+    "verification"
+  ],
+  "completion_policy": {
+    "require_all_acceptance_criteria": true,
+    "require_behavior_obligations": true,
+    "allow_non_applicable_with_evidence": true,
+    "deferred_items_are_incomplete": true
+  },
+  "stagnation_policy": {
+    "detect_repeated_feedback": true,
+    "fallback_target": "one_smaller_verifiable_target"
+  },
+  "artifact_policy": {
+    "harness_artifacts_are_not_solution_changes": true,
+    "include_bitlesson_delta": true
+  }
+}

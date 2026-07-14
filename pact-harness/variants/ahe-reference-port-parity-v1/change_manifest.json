@@ -1,0 +1,42 @@
+{
+  "schema": "pact-harness-change/v1",
+  "variant_id": "ahe-reference-port-parity-v1",
+  "summary": "Adds a reference-port parity workflow for parser and file-format tasks, with a required Reference Parity Ledger and stricter completion gates for fixture parity, exact errors, parse_float invalid returns, datetime/date exception wrapping, and TOMLDecodeError public API behavior.",
+  "rationale": "The PEP680 ahe-failure-oracle-v1 rerun reached PACT_COMPLETE while hidden readiness still failed on upstream-compatible fixture acceptance and rejection, exact error message and location behavior, invalid parse_float return validation, invalid date/datetime wrapping, and TOMLDecodeError constructor/module behavior. The previous workflow allowed local probes and broad equivalence claims to replace reference parity evidence.",
+  "meaningful_difference": "Compared with ahe-failure-oracle-v1, this variant makes parser work reference-first rather than oracle-family-only. Workers must prefer upstream-compatible or tomli-compatible behavior and must populate a Reference Parity Ledger for the known hidden-signature families. Reviewers and finalizers must reject PACT_COMPLETE unless each required parity row has committed fixtures, direct unittest probes, or documented reference comparison evidence.",
+  "changed_files": [
+    "manifest.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json"
+  ],
+  "changed_harness_files": [
+    "manifest.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json",
+    "change_manifest.json"
+  ],
+  "predicted_fixes": [
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "risk_cases": [
+    "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498"
+  ],
+  "predicted_case_effects": [
+    {
+      "case_id": "CPython_PEP-680_tomllib-Support-for-Parsing-TOML-in-the-Standard-Library_PR-31498",
+      "prediction": "Worker should stop treating a local synthetic TOML smoke corpus as enough. Reviewer should block completion unless valid and invalid fixture parity, exact TOMLDecodeError message/location behavior, parse_float invalid-return validation, invalid date/datetime wrapping, and TOMLDecodeError constructor/module parity are proven by committed fixtures, direct unittest probes, or documented upstream/tomli comparison."
+    }
+  ]
+}
