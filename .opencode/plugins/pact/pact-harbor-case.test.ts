@@ -23,5 +23,7 @@ describe("PACT Harbor case runner", () => {
     expect(args.join(" ")).not.toMatch(/sk-or-/)
     expect(input.model).toBe("openrouter/z-ai/glm-5.2")
     expect(input.maxRounds).toBe(3)
+    expect(input.workerCompletionGraceMs).toBe(120_000)
+    expect(args).toContain("worker_completion_grace_ms=120000")
   })
 })

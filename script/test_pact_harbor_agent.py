@@ -52,6 +52,8 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
             command = command_call.kwargs["command"]
             self.assertIn("pact-harbor-run.ts", command)
             self.assertIn("openrouter/z-ai/glm-5.2", command)
+            self.assertIn("--worker-completion-grace-ms", command)
+            self.assertIn("120000", command)
             self.assertNotIn("/tests", command)
             self.assertNotIn("/solution", command)
             config = command_call.kwargs["env"]["OPENCODE_CONFIG_CONTENT"]

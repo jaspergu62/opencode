@@ -39,6 +39,7 @@ class PactOpenCodeAgent(BaseAgent):
         worker_agent: str = "build",
         reviewer_agent: str = "build",
         reviewer_model: str = "openrouter/z-ai/glm-5.2",
+        worker_completion_grace_ms: int | str = 120_000,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -48,6 +49,7 @@ class PactOpenCodeAgent(BaseAgent):
         self.worker_agent = worker_agent
         self.reviewer_agent = reviewer_agent
         self.reviewer_model = reviewer_model
+        self.worker_completion_grace_ms = int(worker_completion_grace_ms)
 
     @staticmethod
     def name() -> str:
@@ -123,6 +125,8 @@ class PactOpenCodeAgent(BaseAgent):
                 self.worker_agent,
                 "--reviewer-agent",
                 self.reviewer_agent,
+                "--worker-completion-grace-ms",
+                str(self.worker_completion_grace_ms),
                 "--loop-id",
                 loop_id,
             ]
@@ -149,6 +153,7 @@ class PactOpenCodeAgent(BaseAgent):
             "pact_model": model,
             "pact_reviewer_model": self.reviewer_model,
             "pact_max_rounds": self.max_rounds,
+            "pact_worker_completion_grace_ms": self.worker_completion_grace_ms,
         }
         if result.return_code != 0:
             raise RuntimeError(f"PACT driver exited with code {result.return_code}")

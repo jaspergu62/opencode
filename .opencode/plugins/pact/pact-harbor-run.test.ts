@@ -11,6 +11,7 @@ describe("PACT Harbor runner", () => {
       reviewerModel: "openrouter/z-ai/glm-5.2",
       workerAgent: "build",
       reviewerAgent: "build",
+      workerCompletionGraceMs: 120_000,
     })
   })
 
@@ -26,9 +27,12 @@ describe("PACT Harbor runner", () => {
       "openrouter/model-b",
       "--loop-id",
       "trial-1",
+      "--worker-completion-grace-ms",
+      "2500",
     ])
     expect(args.model).toBe("openrouter/model-a")
     expect(args.reviewerModel).toBe("openrouter/model-b")
     expect(args.loopID).toBe("trial-1")
+    expect(args.workerCompletionGraceMs).toBe(2500)
   })
 })

@@ -16,6 +16,7 @@ export type PactHarborCaseOptions = {
   keyFile: string
   model: string
   maxRounds: number
+  workerCompletionGraceMs: number
 }
 
 export function pactHarborCaseArgs(raw: string[]): PactHarborCaseOptions {
@@ -44,6 +45,7 @@ export function pactHarborCaseArgs(raw: string[]): PactHarborCaseOptions {
     ),
     model: parsed.model ?? "openrouter/z-ai/glm-5.2",
     maxRounds: Number(parsed["max-rounds"] ?? 3),
+    workerCompletionGraceMs: Number(parsed["worker-completion-grace-ms"] ?? 120_000),
   }
 }
 
@@ -72,6 +74,8 @@ export function harborTrialArgs(input: PactHarborCaseOptions): string[] {
     `reviewer_model=${input.model}`,
     "--agent-env",
     "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}",
+    "--agent-kwarg",
+    `worker_completion_grace_ms=${input.workerCompletionGraceMs}`,
     "--no-force-build",
   ]
 }
@@ -140,6 +144,7 @@ export function runPactHarborTrial(input: PactHarborCaseOptions): HarnessCaseRes
         harness_dir: input.harnessDir,
         model: input.model,
         max_rounds: input.maxRounds,
+        worker_completion_grace_ms: input.workerCompletionGraceMs,
         harbor_exit_code: status,
       },
       null,

@@ -177,6 +177,7 @@ export function runPactDriver(input: {
   reviewerAgent?: string
   workerAgent?: string
   workerConfigSource?: string
+  workerCompletionGraceMs?: number
   variant?: string
   workerRunner?: WorkerRunner
   workerContainerImage?: string
@@ -293,6 +294,10 @@ export function runPactDriver(input: {
       cwd: projectRoot,
       prompt: nextPrompt,
       shellTrampoline: openCodeShellTrampoline,
+      completionArtifact: input.workerCompletionGraceMs
+        ? join(loopDir, `round-${roundName(invokedRound)}-summary.md`)
+        : undefined,
+      completionGraceMs: input.workerCompletionGraceMs,
     })
     invocations++
     if (result.error || result.status !== 0) {
@@ -2328,12 +2333,32 @@ function spawnOpenCodeRun(input: {
   cwd: string
   prompt: string
   shellTrampoline?: boolean
+  completionArtifact?: string
+  completionGraceMs?: number
 }): SpawnResult {
-  const command = input.shellTrampoline ? "/bin/sh" : input.command
-  const args = input.shellTrampoline
+  const targetCommand = input.shellTrampoline ? "/bin/sh" : input.command
+  const targetArgs = input.shellTrampoline
     ? ["-c", 'exec "$@"', "opencode-run", input.command, ...input.args, input.prompt]
     : [...input.args, input.prompt]
-  return input.spawn(command, args, {
+  const completionGraceMs = input.completionGraceMs ?? 0
+  if (input.completionArtifact && Number.isFinite(completionGraceMs) && completionGraceMs > 0) {
+    return input.spawn("node", ["-e", OPENCODE_ARTIFACT_COMPLETION_GUARD], {
+      cwd: input.cwd,
+      input: JSON.stringify({
+        command: targetCommand,
+        args: targetArgs,
+        cwd: input.cwd,
+        artifact: input.completionArtifact,
+        grace_ms: completionGraceMs,
+      }),
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      maxBuffer: OPENCODE_RUN_MAX_BUFFER,
+      timeout: configuredOpenCodeRunTimeoutMs(),
+      env: process.env,
+    })
+  }
+  return input.spawn(targetCommand, targetArgs, {
     cwd: input.cwd,
     input: "",
     encoding: "utf-8",
@@ -2343,6 +2368,77 @@ function spawnOpenCodeRun(input: {
     env: process.env,
   })
 }
+
+const OPENCODE_ARTIFACT_COMPLETION_GUARD = String.raw`
+const fs = require("node:fs")
+const { spawn } = require("node:child_process")
+
+let requestText = ""
+process.stdin.setEncoding("utf8")
+process.stdin.on("data", (chunk) => { requestText += chunk })
+process.stdin.on("end", () => {
+  const request = JSON.parse(requestText)
+  const child = spawn(request.command, request.args, {
+    cwd: request.cwd,
+    env: process.env,
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  const forwardSignal = (signal) => {
+    try { process.kill(-child.pid, signal) } catch {}
+  }
+  process.on("SIGTERM", () => forwardSignal("SIGTERM"))
+  process.on("SIGINT", () => forwardSignal("SIGINT"))
+  const stdout = []
+  const stderr = []
+  child.stdout.on("data", (chunk) => stdout.push(chunk))
+  child.stderr.on("data", (chunk) => stderr.push(chunk))
+
+  let artifactSignature
+  let stableSince = 0
+  let guarded = false
+  let killTimer
+  const graceMs = Math.max(1, Number(request.grace_ms) || 1)
+  const pollMs = Math.max(25, Math.min(1000, Math.floor(graceMs / 4)))
+  const poll = setInterval(() => {
+    if (child.exitCode !== null || child.signalCode !== null) return
+    try {
+      const stat = fs.statSync(request.artifact)
+      const signature = String(stat.size) + ":" + String(stat.mtimeMs)
+      if (signature !== artifactSignature) {
+        artifactSignature = signature
+        stableSince = Date.now()
+        return
+      }
+      if (stableSince && Date.now() - stableSince >= graceMs) {
+        guarded = true
+        clearInterval(poll)
+        stderr.push(Buffer.from("[PACT] OpenCode artifact completion guard closed a non-exiting process after the required artifact stabilized.\n"))
+        try { process.kill(-child.pid, "SIGTERM") } catch {}
+        killTimer = setTimeout(() => {
+          try { process.kill(-child.pid, "SIGKILL") } catch {}
+        }, 5000)
+      }
+    } catch {
+      artifactSignature = undefined
+      stableSince = 0
+    }
+  }, pollMs)
+
+  child.on("error", (error) => {
+    clearInterval(poll)
+    if (killTimer) clearTimeout(killTimer)
+    stderr.push(Buffer.from(String(error) + "\n"))
+  })
+  child.on("close", (code, signal) => {
+    clearInterval(poll)
+    if (killTimer) clearTimeout(killTimer)
+    process.stdout.write(Buffer.concat(stdout))
+    process.stderr.write(Buffer.concat(stderr))
+    process.exitCode = guarded ? 0 : (typeof code === "number" ? code : signal ? 1 : 0)
+  })
+})
+`
 
 function configuredOpenCodeRunTimeoutMs(): number | undefined {
   const raw = env.PACT_OPENCODE_RUN_TIMEOUT_MS ?? env.PACT_OPENCODE_TIMEOUT_MS
@@ -2499,6 +2595,7 @@ export function cliArgs(raw: string[]): {
   reviewerAgent?: string
   workerAgent?: string
   workerConfigSource?: string
+  workerCompletionGraceMs?: number
   variant?: string
   workerRunner?: WorkerRunner
   workerContainerImage?: string
@@ -2542,6 +2639,9 @@ export function cliArgs(raw: string[]): {
     reviewerAgent: parsed["reviewer-agent"],
     workerAgent: parsed["worker-agent"] ?? parsed.agent,
     workerConfigSource: parsed["worker-config-source"],
+    workerCompletionGraceMs: parsed["worker-completion-grace-ms"]
+      ? Number(parsed["worker-completion-grace-ms"])
+      : undefined,
     variant: parsed.variant,
     workerRunner: (parsed["worker-runner"] ?? env.PACT_WORKER_RUNNER) === "docker" ? "docker" : "host",
     workerContainerImage: parsed["worker-container-image"] ?? env.LOLBENCH_AGENT_IMAGE_TAG,

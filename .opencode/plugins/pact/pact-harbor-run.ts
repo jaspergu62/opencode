@@ -14,6 +14,7 @@ export type PactHarborRunOptions = {
   reviewerModel: string
   workerAgent: string
   reviewerAgent: string
+  workerCompletionGraceMs: number
   loopID?: string
 }
 
@@ -49,6 +50,7 @@ export function runPactHarborCase(input: PactHarborRunOptions) {
     workerRunner: "host",
     workerAgent: input.workerAgent,
     workerConfigSource: "harbor-openrouter",
+    workerCompletionGraceMs: input.workerCompletionGraceMs,
     reviewerAgent: input.reviewerAgent,
     plannerBackend: "spec-import",
     reviewerBackend: "opencode-cli",
@@ -86,6 +88,7 @@ export function pactHarborArgs(raw: string[]): PactHarborRunOptions {
     reviewerModel: parsed["reviewer-model"] ?? parsed.model ?? "openrouter/z-ai/glm-5.2",
     workerAgent: parsed["worker-agent"] ?? "build",
     reviewerAgent: parsed["reviewer-agent"] ?? "build",
+    workerCompletionGraceMs: Number(parsed["worker-completion-grace-ms"] ?? 120_000),
     loopID: parsed["loop-id"],
   }
 }

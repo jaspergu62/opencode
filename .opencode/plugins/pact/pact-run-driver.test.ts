@@ -1406,6 +1406,46 @@ Continue.
     }
   })
 
+  test("worker artifact completion guard releases a non-exiting OpenCode process", () => {
+    const project = tempGitProject()
+    const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-artifact-guard-bin-"))
+    tempDirs.push(binDir)
+    const fakeOpencode = join(binDir, "fake-opencode")
+    writeFileSync(
+      fakeOpencode,
+      `#!/bin/sh
+loop_dir=$(find "$PWD/.pact/loops" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+printf '%s\n' '# Worker Summary' 'Focused verification completed.' > "$loop_dir/round-01-summary.md"
+printf '%s\n' 'worker change' >> "$PWD/src.txt"
+exec sleep 2
+`,
+      "utf-8",
+    )
+    chmodSync(fakeOpencode, 0o755)
+
+    const result = runPactDriver({
+      projectRoot: project,
+      planFile: join(project, "plan.md"),
+      model: "openrouter/z-ai/glm-5.2",
+      maxRounds: 1,
+      opencodeCommand: fakeOpencode,
+      workerCompletionGraceMs: 100,
+      maxInvocations: 1,
+      planner() {
+        return validPlannerOutput()
+      },
+      reviewer() {
+        return "### Decision Summary\nComplete.\n\nPACT_COMPLETE\n"
+      },
+    })
+
+    expect(result.status).toBe("max_invocations")
+    expect(result.loopDir).toBeDefined()
+    expect(readFileSync(join(result.loopDir!, "round-01-trajectory.json"), "utf-8")).toContain(
+      "artifact completion guard",
+    )
+  })
+
   test("default OpenCode runner times out hung commands", () => {
     const project = tempGitProject()
     const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-timeout-bin-"))
