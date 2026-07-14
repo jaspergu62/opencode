@@ -11,6 +11,7 @@ from harbor.models.task.config import NetworkMode, TaskConfig
 
 
 DEFAULT_RUNTIME_IMAGE = "pact/harbor-runtime:opencode-1.17.14-bun-1.3.14-amd64"
+DEFAULT_MUSL_RUNTIME_IMAGE = "pact/harbor-runtime:opencode-1.17.14-bun-1.3.14-musl-amd64"
 BASE_FROM_RE = re.compile(r"^FROM(?:\s+--platform=\S+)?\s+(\S+)(?:\s+AS\s+\S+)?\s*$", re.IGNORECASE | re.MULTILINE)
 
 
@@ -56,6 +57,11 @@ def inject_pact_runtime(dockerfile: str, runtime_image: str) -> str:
     )
 
 
+def runtime_image_for_case(case: dict[str, Any], runtime_image: str, musl_runtime_image: str) -> str:
+    tags = {str(tag).lower() for tag in case.get("tags", [])}
+    return musl_runtime_image if "runtime:musl" in tags else runtime_image
+
+
 def configure_task(task_toml: str, network_mode: str = "strict", docker_image: str | None = None) -> str:
     config = TaskConfig.model_validate_toml(task_toml)
     config.schema_version = "1.3"
@@ -95,6 +101,7 @@ def prepare_suite(
     output_path: Path,
     runtime_image: str,
     network_mode: str,
+    musl_runtime_image: str = DEFAULT_MUSL_RUNTIME_IMAGE,
 ) -> list[dict[str, Any]]:
     source = load_suite(suite_path)
     indexed = task_index(tasks_root)
@@ -109,7 +116,8 @@ def prepare_suite(
         task_toml_path = task_path / "task.toml"
         original_dockerfile = dockerfile_path.read_text(encoding="utf-8")
         base_image = official_base_image(original_dockerfile)
-        prepared_dockerfile = inject_pact_runtime(original_dockerfile, runtime_image)
+        case_runtime_image = runtime_image_for_case(case, runtime_image, musl_runtime_image)
+        prepared_dockerfile = inject_pact_runtime(original_dockerfile, case_runtime_image)
         dockerfile_path.write_text(prepared_dockerfile, encoding="utf-8")
         runtime_hash = hashlib.sha256(prepared_dockerfile.encode()).hexdigest()[:12]
         derived_image = f"pact/swebench-pro:{slug(case['id'])}-{runtime_hash}"
@@ -138,7 +146,7 @@ def prepare_suite(
                 "instance_id": instance_id,
                 "task_path": str(task_path.resolve()),
                 "official_base_image": base_image,
-                "runtime_image": runtime_image,
+                "runtime_image": case_runtime_image,
                 "runtime_hash": runtime_hash,
                 "derived_image": derived_image,
             }
@@ -168,6 +176,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare GPT-certified SWE-bench Pro Harbor tasks for PACT")
     parser.add_argument("--suite-dir", required=True, type=Path)
     parser.add_argument("--runtime-image", default=DEFAULT_RUNTIME_IMAGE)
+    parser.add_argument("--musl-runtime-image", default=DEFAULT_MUSL_RUNTIME_IMAGE)
     parser.add_argument("--network-mode", choices=("strict", "docker-desktop-host-block"), default="strict")
     args = parser.parse_args()
     suite_dir = args.suite_dir.expanduser().resolve()
@@ -181,12 +190,16 @@ def main() -> None:
                 harbor_root / f"{split}-suite.json",
                 args.runtime_image,
                 args.network_mode,
+                args.musl_runtime_image,
             )
         )
     manifest = {
         "schema": "pact-swebench-pro-images/v1",
         "platform": "linux/amd64",
-        "runtime_image": args.runtime_image,
+        "runtime_images": {
+            "glibc": args.runtime_image,
+            "musl": args.musl_runtime_image,
+        },
         "network_enforcement": args.network_mode,
         "tasks": records,
     }

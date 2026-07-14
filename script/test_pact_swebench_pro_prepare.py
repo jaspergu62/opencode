@@ -1,9 +1,20 @@
 import unittest
 
-from script.pact_swebench_pro_prepare import configure_task, inject_pact_runtime, official_base_image
+from script.pact_swebench_pro_prepare import (
+    configure_task,
+    inject_pact_runtime,
+    official_base_image,
+    runtime_image_for_case,
+)
 
 
 class PrepareSWEbenchProTest(unittest.TestCase):
+    def test_selects_musl_runtime_only_for_explicitly_tagged_cases(self):
+        glibc = "pact/harbor-runtime:glibc"
+        musl = "pact/harbor-runtime:musl"
+        self.assertEqual(runtime_image_for_case({"tags": ["typescript"]}, glibc, musl), glibc)
+        self.assertEqual(runtime_image_for_case({"tags": ["runtime:musl"]}, glibc, musl), musl)
+
     def test_extracts_real_official_image_and_injects_amd64_runtime_once(self):
         original = """FROM jefzda/sweap-images:owner.repo-case\nENTRYPOINT []\nWORKDIR /app\n"""
         runtime = "pact/harbor-runtime:test-amd64"
