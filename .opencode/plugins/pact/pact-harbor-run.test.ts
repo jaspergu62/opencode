@@ -12,6 +12,7 @@ describe("PACT Harbor runner", () => {
       workerAgent: "build",
       reviewerAgent: "build",
       workerCompletionGraceMs: 120_000,
+      reviewerCompletionGraceMs: 120_000,
     })
   })
 
@@ -29,10 +30,13 @@ describe("PACT Harbor runner", () => {
       "trial-1",
       "--worker-completion-grace-ms",
       "2500",
+      "--reviewer-completion-grace-ms",
+      "3500",
     ])
     expect(args.model).toBe("openrouter/model-a")
     expect(args.reviewerModel).toBe("openrouter/model-b")
     expect(args.loopID).toBe("trial-1")
     expect(args.workerCompletionGraceMs).toBe(2500)
+    expect(args.reviewerCompletionGraceMs).toBe(3500)
   })
 })

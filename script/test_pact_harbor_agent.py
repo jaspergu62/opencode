@@ -53,6 +53,7 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("pact-harbor-run.ts", command)
             self.assertIn("openrouter/z-ai/glm-5.2", command)
             self.assertIn("--worker-completion-grace-ms", command)
+            self.assertIn("--reviewer-completion-grace-ms", command)
             self.assertIn("120000", command)
             self.assertNotIn("/tests", command)
             self.assertNotIn("/solution", command)

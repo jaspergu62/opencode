@@ -178,6 +178,7 @@ export function runPactDriver(input: {
   workerAgent?: string
   workerConfigSource?: string
   workerCompletionGraceMs?: number
+  reviewerCompletionGraceMs?: number
   variant?: string
   workerRunner?: WorkerRunner
   workerContainerImage?: string
@@ -332,6 +333,7 @@ export function runPactDriver(input: {
       opencodeCommand: input.opencodeCommand ?? "opencode",
       shellTrampoline: openCodeShellTrampoline,
       reviewerAgent: input.reviewerAgent ?? "pact-reviewer",
+      reviewerCompletionGraceMs: input.reviewerCompletionGraceMs,
       reviewerEffort,
       agent: input.workerAgent ?? input.agent,
       model: input.model,
@@ -931,6 +933,7 @@ function invokeDriverReviewer(
     shellTrampoline: boolean
     reviewerAgent?: string
     workerModel: string
+    reviewerCompletionGraceMs?: number
   },
 ): string {
   if (input.reviewer) {
@@ -957,6 +960,9 @@ function invokeDriverReviewer(
       agent: input.reviewerAgent,
       spawnSync: input.spawnSync,
       shellTrampoline: input.shellTrampoline,
+      loopDir: input.loopDir,
+      round: input.round,
+      completionGraceMs: input.reviewerCompletionGraceMs,
     })
   }
   throw new Error(`Unsupported PACT driver reviewer backend: ${input.state.reviewer_backend}`)
@@ -1050,6 +1056,7 @@ function finalizeRoundAfterRunExit(input: {
   spawnSync: SpawnSyncLike
   opencodeCommand: string
   reviewerAgent: string
+  reviewerCompletionGraceMs?: number
   shellTrampoline: boolean
   agent?: string
   model: string
@@ -1187,6 +1194,7 @@ function finalizeRoundAfterRunExit(input: {
       opencodeCommand: input.opencodeCommand,
       shellTrampoline: input.shellTrampoline,
       reviewerAgent: input.reviewerAgent,
+      reviewerCompletionGraceMs: input.reviewerCompletionGraceMs,
       workerModel: input.model,
     })
   } catch (err) {
@@ -2110,16 +2118,27 @@ function invokeDriverOpenCodeReviewer(
     agent?: string
     spawnSync: SpawnSyncLike
     shellTrampoline: boolean
+    loopDir: string
+    round: number
+    completionGraceMs?: number
   },
 ): string {
   const args = buildOpencodeRunArgs({ model: input.model, agent: input.agent })
+  const completionArtifact = input.completionGraceMs
+    ? join(input.loopDir, `round-${roundName(input.round)}-review-draft.md`)
+    : undefined
+  const reviewerPrompt = completionArtifact
+    ? `${prompt}\n\n## Reviewer completion protocol\nWrite the complete review, including its final PACT decision marker, to ${completionArtifact} as your final action. Do not modify project source files. After writing that file, stop all work and return.`
+    : prompt
   const result = spawnOpenCodeRun({
     spawn: input.spawnSync,
     command: input.command,
     args,
     cwd: input.projectRoot,
-    prompt,
+    prompt: reviewerPrompt,
     shellTrampoline: input.shellTrampoline,
+    completionArtifact,
+    completionGraceMs: input.completionGraceMs,
   })
   if (result.error) throw result.error
   if (result.status !== 0) {
@@ -2140,6 +2159,7 @@ function invokeDriverOpenCodeReviewer(
       ),
     )
   }
+  if (completionArtifact && existsSync(completionArtifact)) return readFileSync(completionArtifact, "utf-8")
   return result.stdout || result.stderr || "OpenCode reviewer returned no content."
 }
 
@@ -2596,6 +2616,7 @@ export function cliArgs(raw: string[]): {
   workerAgent?: string
   workerConfigSource?: string
   workerCompletionGraceMs?: number
+  reviewerCompletionGraceMs?: number
   variant?: string
   workerRunner?: WorkerRunner
   workerContainerImage?: string
@@ -2641,6 +2662,9 @@ export function cliArgs(raw: string[]): {
     workerConfigSource: parsed["worker-config-source"],
     workerCompletionGraceMs: parsed["worker-completion-grace-ms"]
       ? Number(parsed["worker-completion-grace-ms"])
+      : undefined,
+    reviewerCompletionGraceMs: parsed["reviewer-completion-grace-ms"]
+      ? Number(parsed["reviewer-completion-grace-ms"])
       : undefined,
     variant: parsed.variant,
     workerRunner: (parsed["worker-runner"] ?? env.PACT_WORKER_RUNNER) === "docker" ? "docker" : "host",

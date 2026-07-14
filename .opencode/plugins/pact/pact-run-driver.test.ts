@@ -1446,6 +1446,50 @@ exec sleep 2
     )
   })
 
+  test("reviewer artifact completion guard releases a non-exiting OpenCode process", () => {
+    const project = tempGitProject()
+    const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-reviewer-guard-bin-"))
+    tempDirs.push(binDir)
+    const fakeOpencode = join(binDir, "fake-opencode")
+    writeFileSync(
+      fakeOpencode,
+      `#!/bin/sh
+loop_dir=$(find "$PWD/.pact/loops" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+case "$*" in
+  *"Reviewer completion protocol"*)
+    printf '%s\n' '### Decision Summary' 'Complete.' '' 'PACT_COMPLETE' > "$loop_dir/round-01-review-draft.md"
+    exec sleep 2
+    ;;
+  *)
+    printf '%s\n' '# Worker Summary' 'Focused verification completed.' > "$loop_dir/round-01-summary.md"
+    printf '%s\n' 'worker change' >> "$PWD/src.txt"
+    ;;
+esac
+`,
+      "utf-8",
+    )
+    chmodSync(fakeOpencode, 0o755)
+
+    const result = runPactDriver({
+      projectRoot: project,
+      planFile: join(project, "plan.md"),
+      model: "openrouter/z-ai/glm-5.2",
+      maxRounds: 1,
+      opencodeCommand: fakeOpencode,
+      reviewerBackend: "opencode-cli",
+      reviewerModel: "openrouter/z-ai/glm-5.2",
+      reviewerCompletionGraceMs: 100,
+      maxInvocations: 1,
+      planner() {
+        return validPlannerOutput()
+      },
+    })
+
+    expect(result.status).toBe("max_invocations")
+    expect(result.loopDir).toBeDefined()
+    expect(readFileSync(join(result.loopDir!, "round-01-review.md"), "utf-8")).toContain("PACT_COMPLETE")
+  })
+
   test("default OpenCode runner times out hung commands", () => {
     const project = tempGitProject()
     const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-timeout-bin-"))
