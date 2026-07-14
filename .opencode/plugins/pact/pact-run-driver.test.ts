@@ -113,6 +113,14 @@ Fix the requested behavior.
 <<<END_PACT_GOAL_TRACKER>>>`
 }
 
+function opencodePromptArg(args: string[]): string {
+  return args.at(-1) ?? ""
+}
+
+function opencodeBaseArgs(args: string[]): string[] {
+  return args.slice(0, -1)
+}
+
 describe("PACT run driver", () => {
   test("defaults LoLBench worker budget to twelve rounds", () => {
     const parsed = cliArgs(["--plan-file", "/tmp/PROMPT.md"])
@@ -121,18 +129,87 @@ describe("PACT run driver", () => {
     expect(parsed.model).toBe("zai-coding-plan/glm-5-turbo")
   })
 
-  test("parses planner and reviewer models from CLI", () => {
+  test("parses planner and reviewer models and backends from CLI", () => {
     const parsed = cliArgs([
       "--plan-file",
       "/tmp/PROMPT.md",
+      "--planner-backend",
+      "openrouter-chat",
       "--planner-model",
-      "gpt-5.5",
+      "z-ai/glm-5.2",
+      "--planner-effort",
+      "high",
+      "--reviewer-backend",
+      "opencode-cli",
       "--reviewer-model",
-      "gpt-5.5",
+      "openrouter/z-ai/glm-5.2",
+      "--reviewer-effort",
+      "low",
+      "--reviewer-agent",
+      "build",
     ])
 
-    expect(parsed.plannerModel).toBe("gpt-5.5")
-    expect(parsed.reviewerModel).toBe("gpt-5.5")
+    expect(parsed.plannerBackend).toBe("openrouter-chat")
+    expect(parsed.plannerModel).toBe("z-ai/glm-5.2")
+    expect(parsed.plannerEffort).toBe("high")
+    expect(parsed.reviewerBackend).toBe("opencode-cli")
+    expect(parsed.reviewerModel).toBe("openrouter/z-ai/glm-5.2")
+    expect(parsed.reviewerEffort).toBe("low")
+    expect(parsed.reviewerAgent).toBe("build")
+    expect(() => cliArgs(["--plan-file", "/tmp/PROMPT.md", "--reviewer-effort", "extreme"])).toThrow(
+      "Unsupported model reasoning effort: extreme",
+    )
+    expect(() =>
+      cliArgs(["--plan-file", "/tmp/PROMPT.md", "--reviewer-backend", "openrouter-chat"]),
+    ).toThrow("Unsupported PACT reviewer backend: openrouter-chat")
+  })
+
+  test("allows OpenRouter chat planner but rejects it as a reviewer backend", () => {
+    expect(
+      cliArgs([
+        "--plan-file",
+        "/tmp/PROMPT.md",
+        "--planner-backend",
+        "openrouter-chat",
+        "--planner-model",
+        "openai/gpt-5.5",
+      ]),
+    ).toMatchObject({
+      plannerBackend: "openrouter-chat",
+      plannerModel: "openai/gpt-5.5",
+    })
+    expect(() =>
+      cliArgs(["--plan-file", "/tmp/PROMPT.md", "--reviewer", "openrouter-chat", "--reviewer-model", "openai/gpt-5.5"]),
+    ).toThrow("Unsupported PACT reviewer backend: openrouter-chat")
+  })
+
+  test("parses OpenCode planner and reviewer backends with agents from CLI aliases", () => {
+    const parsed = cliArgs([
+      "--plan-file",
+      "/tmp/PROMPT.md",
+      "--planner-backend",
+      "opencode-cli",
+      "--planner-agent",
+      "pact-planner",
+      "--planner-model",
+      "openrouter/z-ai/glm-5.2",
+      "--reviewer",
+      "opencode-cli",
+      "--reviewer-agent",
+      "pact-reviewer",
+      "--reviewer-model",
+      "openrouter/z-ai/glm-5.2",
+      "--worker-agent",
+      "pact-worker",
+    ])
+
+    expect(parsed.plannerBackend).toBe("opencode-cli")
+    expect(parsed.plannerAgent).toBe("pact-planner")
+    expect(parsed.plannerModel).toBe("openrouter/z-ai/glm-5.2")
+    expect(parsed.reviewerBackend).toBe("opencode-cli")
+    expect(parsed.reviewerAgent).toBe("pact-reviewer")
+    expect(parsed.reviewerModel).toBe("openrouter/z-ai/glm-5.2")
+    expect(parsed.agent).toBe("pact-worker")
   })
 
   test("rejects OpenRouter chat as a planner or reviewer backend", () => {
@@ -243,6 +320,20 @@ describe("PACT run driver", () => {
     }
   })
 
+  test("parses harness directory from CLI or environment", () => {
+    const oldHarness = process.env.PACT_HARNESS_DIR
+    process.env.PACT_HARNESS_DIR = "/tmp/pact-harness-env"
+    try {
+      expect(cliArgs(["--plan-file", "/tmp/PROMPT.md"]).harnessDir).toBe("/tmp/pact-harness-env")
+      expect(cliArgs(["--plan-file", "/tmp/PROMPT.md", "--harness-dir", "/tmp/pact-harness-cli"]).harnessDir).toBe(
+        "/tmp/pact-harness-cli",
+      )
+    } finally {
+      if (oldHarness === undefined) delete process.env.PACT_HARNESS_DIR
+      else process.env.PACT_HARNESS_DIR = oldHarness
+    }
+  })
+
   test("builds an explicit start prompt from LoLBench inputs", () => {
     const prompt = buildPactStartPrompt({
       planFile: "/tmp/PROMPT.md",
@@ -262,9 +353,49 @@ describe("PACT run driver", () => {
     expect(prompt).toContain("verification_timeout_ms=600000")
   })
 
+  test("uses a harness planner template when running the driver", () => {
+    const project = tempGitProject()
+    const harnessDir = join(project, "pact-harness")
+    mkdirSync(harnessDir)
+    writeFileSync(
+      join(harnessDir, "manifest.json"),
+      JSON.stringify(
+        {
+          schema: "pact-harness/v1",
+          id: "driver-harness",
+          templates: {
+            planner: "planner.md",
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf-8",
+    )
+    writeFileSync(join(harnessDir, "planner.md"), "CUSTOM PLANNER {{planPath}}\n{{planContent}}", "utf-8")
+    let plannerPrompt = ""
+
+    const result = runPactDriver({
+      projectRoot: project,
+      planFile: join(project, "plan.md"),
+      model: "zai-coding-plan/glm-5-turbo",
+      maxRounds: 1,
+      maxInvocations: 0,
+      harnessDir,
+      planner(prompt) {
+        plannerPrompt = prompt
+        return validPlannerOutput()
+      },
+    })
+
+    expect(result.status).toBe("max_invocations")
+    expect(plannerPrompt).toContain("CUSTOM PLANNER")
+    expect(plannerPrompt).toContain(join(project, "plan.md"))
+  })
+
   test("starts a fresh OpenCode session for the finalize follow-up by default", () => {
     const project = tempGitProject()
-    const calls: Array<{ command: string; args: string[]; input: string; maxBuffer?: number }> = []
+    const calls: Array<{ command: string; args: string[]; input: string; stdin?: string; maxBuffer?: number }> = []
     let loopDir = ""
 
     const result = runPactDriver({
@@ -279,7 +410,7 @@ describe("PACT run driver", () => {
         return validPlannerOutput()
       },
       spawnSync(command, args, options) {
-        calls.push({ command, args, input: options.input, maxBuffer: options.maxBuffer })
+        calls.push({ command, args, input: opencodePromptArg(args), stdin: options.input, maxBuffer: options.maxBuffer })
         if (calls.length === 1) {
           const state = readState(loopDir)
           state.phase = "finalize"
@@ -302,10 +433,21 @@ describe("PACT run driver", () => {
 
     expect(result.status).toBe("complete")
     expect(result.invocations).toBe(2)
-    expect(calls[0]?.args).toEqual(["run", "--dangerously-skip-permissions", "-m", "zai-coding-plan/glm-5-turbo"])
+    expect(opencodeBaseArgs(calls[0]?.args ?? [])).toEqual([
+      "run",
+      "--dangerously-skip-permissions",
+      "-m",
+      "zai-coding-plan/glm-5-turbo",
+    ])
     expect(calls[0]?.input).toContain("# PACT Round 01")
+    expect(calls[0]?.stdin).toBe("")
     expect(calls[0]?.maxBuffer).toBeGreaterThanOrEqual(50 * 1024 * 1024)
-    expect(calls[1]?.args).toEqual(["run", "--dangerously-skip-permissions", "-m", "zai-coding-plan/glm-5-turbo"])
+    expect(opencodeBaseArgs(calls[1]?.args ?? [])).toEqual([
+      "run",
+      "--dangerously-skip-permissions",
+      "-m",
+      "zai-coding-plan/glm-5-turbo",
+    ])
     expect(calls[1]?.input).toBe("finalize phase prompt\n")
     expect(existsSync(join(loopDir, "round-01-trajectory.json"))).toBe(true)
     expect(readFileSync(join(loopDir, "round-01-trajectory.json"), "utf-8")).toContain("worker log")
@@ -336,8 +478,8 @@ Continue.
 Continue source changes.
 `
       },
-      spawnSync(_command, _args, options) {
-        calls.push({ input: options.input })
+      spawnSync(_command, args) {
+        calls.push({ input: opencodePromptArg(args) })
         appendFileSync(join(project, "src.txt"), "worker change\n", "utf-8")
         return { status: 0, stdout: "worker run\n", stderr: "" }
       },
@@ -433,8 +575,8 @@ Continue source changes.
       reviewer() {
         return "### Decision Summary\nContinue.\n"
       },
-      spawnSync(_command, _args, options) {
-        calls.push({ input: options.input })
+      spawnSync(_command, args) {
+        calls.push({ input: opencodePromptArg(args) })
         appendFileSync(join(project, "src.txt"), "worker change after resume\n", "utf-8")
         return { status: 0, stdout: "worker run\n", stderr: "" }
       },
@@ -514,7 +656,7 @@ Continue source changes.
     })
 
     expect(result.status).toBe("stopped")
-    expect(calls[0]?.args).toEqual([
+    expect(opencodeBaseArgs(calls[0]?.args ?? [])).toEqual([
       "run",
       "--dangerously-skip-permissions",
       "-m",
@@ -522,7 +664,9 @@ Continue source changes.
       "--agent",
       "pact-planner",
     ])
-    expect(calls[1]?.args).toEqual([
+    expect(opencodePromptArg(calls[0]?.args ?? [])).toContain("# PACT Planner")
+    expect(calls[0]?.input).toBe("")
+    expect(opencodeBaseArgs(calls[1]?.args ?? [])).toEqual([
       "run",
       "--dangerously-skip-permissions",
       "-m",
@@ -530,7 +674,9 @@ Continue source changes.
       "--agent",
       "pact-worker",
     ])
-    expect(calls[2]?.args).toEqual([
+    expect(opencodePromptArg(calls[1]?.args ?? [])).toContain("# PACT Round 01")
+    expect(calls[1]?.input).toBe("")
+    expect(opencodeBaseArgs(calls[2]?.args ?? [])).toEqual([
       "run",
       "--dangerously-skip-permissions",
       "-m",
@@ -538,6 +684,8 @@ Continue source changes.
       "--agent",
       "pact-reviewer",
     ])
+    expect(opencodePromptArg(calls[2]?.args ?? [])).toContain("# PACT Review Round 01")
+    expect(calls[2]?.input).toBe("")
     expect(JSON.parse(readFileSync(join(result.loopDir!, "round-01-result.json"), "utf-8"))).toMatchObject({
       planner_backend: "opencode-cli",
       planner_model: "openrouter/z-ai/glm-5.2",
@@ -568,7 +716,7 @@ Continue source changes.
     process.env.OPENCODE_CONFIG = "/root/.config/opencode/opencode.json"
     process.env.LOLBENCH_MEM = "7g"
     process.env.LOLBENCH_CPUS = "4"
-    const calls: Array<{ command: string; args: string[]; input: string }> = []
+    const calls: Array<{ command: string; args: string[]; input: string; stdin?: string }> = []
 
     try {
       const result = runPactDriver({
@@ -586,7 +734,7 @@ Continue source changes.
           return "### Decision Summary\nContinue.\n"
         },
         spawnSync(command, args, options) {
-          calls.push({ command, args, input: options.input })
+          calls.push({ command, args, input: opencodePromptArg(args), stdin: options.input })
           appendFileSync(join(project, "src.txt"), "worker change\n", "utf-8")
           return { status: 0, stdout: "container worker\n", stderr: "" }
         },
@@ -597,6 +745,9 @@ Continue source changes.
       expect(calls[0]?.command).toBe("docker")
       expect(calls[0]?.args).toContain("run")
       expect(calls[0]?.args).toContain("-i")
+      const nameIndex = calls[0]!.args.indexOf("--name")
+      expect(nameIndex).toBeGreaterThan(-1)
+      expect(calls[0]?.args[nameIndex + 1]).toStartWith("pact-worker-")
       expect(calls[0]?.args).toContain("--memory")
       expect(calls[0]?.args).toContain("7g")
       expect(calls[0]?.args).toContain("--cpus")
@@ -617,7 +768,7 @@ Continue source changes.
       expect(configArg).toContain("/opt/opencode-pact-plugins/pact.ts")
       expect(configArg).not.toContain(pluginDir)
       const imageIndex = calls[0]!.args.indexOf("lolbench/cpython-agent:1")
-      expect(calls[0]?.args.slice(imageIndex + 1)).toEqual([
+      expect(opencodeBaseArgs(calls[0]?.args ?? []).slice(imageIndex + 1)).toEqual([
         "opencode",
         "run",
         "--dangerously-skip-permissions",
@@ -625,6 +776,7 @@ Continue source changes.
         "zai-coding-plan/glm-5-turbo",
       ])
       expect(calls[0]?.input).toContain("# PACT Round 01")
+      expect(calls[0]?.stdin).toBe("")
       expect(calls[0]?.input).not.toContain(project)
       expect(calls[0]?.input).toContain(".pact/loops/")
       expect(calls[0]?.input).toContain("round-01-contract.md")
@@ -677,8 +829,8 @@ Continue source changes.
 Continue.
 `
         },
-        spawnSync(_command, _args, options) {
-          calls.push({ input: options.input })
+        spawnSync(_command, args) {
+          calls.push({ input: opencodePromptArg(args) })
           appendFileSync(join(project, "src.txt"), "worker change\n", "utf-8")
           return { status: 0, stdout: "worker run\n", stderr: "" }
         },
@@ -691,6 +843,7 @@ Continue.
       const plannerArgs = readFileSync(plannerArgsPath, "utf-8").split("\n")
       expect(plannerArgs).toContain("--sandbox")
       expect(plannerArgs).toContain("read-only")
+      expect(plannerArgs).toContain('model_reasoning_effort="medium"')
       const state = readState(result.loopDir!)
       expect(state.stop_reason).toBe("max_rounds")
       expect(readFileSync(join(result.loopDir!, "round-01-result.json"), "utf-8")).toContain(
@@ -700,6 +853,115 @@ Continue.
       if (oldPath === undefined) delete process.env.PATH
       else process.env.PATH = oldPath
     }
+  })
+
+  test("codex-cli reviewer honors explicit reviewer effort", () => {
+    const project = tempGitProject()
+    const binDir = mkdtempSync(join(tmpdir(), "pact-driver-codex-reviewer-bin-"))
+    tempDirs.push(binDir)
+    const oldPath = process.env.PATH
+    const plannerOutputPath = join(binDir, "planner-output.txt")
+    const countPath = join(binDir, "codex-count.txt")
+    const plannerArgsPath = join(binDir, "planner-args.txt")
+    const reviewerArgsPath = join(binDir, "reviewer-args.txt")
+    writeFileSync(plannerOutputPath, validPlannerOutput(), "utf-8")
+    writeFileSync(
+      join(binDir, "codex"),
+      `#!/bin/sh
+count=0
+if [ -f ${JSON.stringify(countPath)} ]; then count=$(cat ${JSON.stringify(countPath)}); fi
+count=$((count + 1))
+printf '%s' "$count" > ${JSON.stringify(countPath)}
+if [ "$count" -eq 1 ]; then
+  printf '%s\\n' "$@" > ${JSON.stringify(plannerArgsPath)}
+  cat >/dev/null
+  cat ${JSON.stringify(plannerOutputPath)}
+else
+  printf '%s\\n' "$@" > ${JSON.stringify(reviewerArgsPath)}
+  cat >/dev/null
+  printf '%s\\n' '### Decision Summary' 'Continue.'
+fi
+`,
+      "utf-8",
+    )
+    chmodSync(join(binDir, "codex"), 0o755)
+    process.env.PATH = `${binDir}:${oldPath ?? ""}`
+    try {
+      const result = runPactDriver({
+        projectRoot: project,
+        planFile: join(project, "plan.md"),
+        model: "openrouter/z-ai/glm-5.2",
+        maxRounds: 1,
+        opencodeCommand: "fake-opencode",
+        reviewerBackend: "codex-cli",
+        reviewerModel: "gpt-5.4-mini",
+        reviewerEffort: "high",
+        maxInvocations: 1,
+        spawnSync(_command, args) {
+          appendFileSync(join(project, "src.txt"), "worker change\n", "utf-8")
+          expect(opencodePromptArg(args)).toContain("# PACT Round 01")
+          return { status: 0, stdout: "worker run\n", stderr: "" }
+        },
+      })
+
+      expect(result.status).toBe("stopped")
+      const plannerArgs = readFileSync(plannerArgsPath, "utf-8").split("\n")
+      const reviewerArgs = readFileSync(reviewerArgsPath, "utf-8").split("\n")
+      expect(plannerArgs).toContain('model_reasoning_effort="medium"')
+      expect(reviewerArgs).toContain("-m")
+      expect(reviewerArgs).toContain("gpt-5.4-mini")
+      expect(reviewerArgs).toContain('model_reasoning_effort="high"')
+      expect(readState(result.loopDir!)).toMatchObject({
+        reviewer_backend: "codex-cli",
+        reviewer_model: "gpt-5.4-mini",
+        reviewer_effort: "high",
+      })
+    } finally {
+      if (oldPath === undefined) delete process.env.PATH
+      else process.env.PATH = oldPath
+    }
+  })
+
+  test("openrouter-chat planner can initialize Round00 without enabling chat reviewer", () => {
+    const project = tempGitProject()
+    const plannerCalls: Array<{ model: string; repair: boolean; prompt: string }> = []
+    const workerPrompts: string[] = []
+
+    const result = runPactDriver({
+      projectRoot: project,
+      planFile: join(project, "plan.md"),
+      model: "openrouter/z-ai/glm-5.2",
+      maxRounds: 1,
+      opencodeCommand: "fake-opencode",
+      maxInvocations: 1,
+      plannerBackend: "openrouter-chat",
+      plannerModel: "z-ai/glm-5.2",
+      reviewer() {
+        return `### Decision Summary
+Continue.
+`
+      },
+      openRouterChat(prompt, context) {
+        plannerCalls.push({ model: context.model, repair: context.repair, prompt })
+        return validPlannerOutput()
+      },
+      spawnSync(_command, args) {
+        workerPrompts.push(opencodePromptArg(args))
+        appendFileSync(join(project, "src.txt"), "worker change\n", "utf-8")
+        return { status: 0, stdout: "worker run\n", stderr: "" }
+      },
+    })
+
+    expect(result.status).toBe("stopped")
+    expect(plannerCalls).toHaveLength(1)
+    expect(plannerCalls[0]).toMatchObject({ model: "z-ai/glm-5.2", repair: false })
+    expect(plannerCalls[0]?.prompt).toContain("<<<PACT_PLAN>>>")
+    expect(workerPrompts[0]).toContain("# PACT Round 01")
+    expect(readState(result.loopDir!)).toMatchObject({
+      planner_backend: "openrouter-chat",
+      planner_model: "z-ai/glm-5.2",
+      reviewer_backend: "codex-cli",
+    })
   })
 
   test("driver finalizes a run-exit round without waiting for session idle", () => {
@@ -743,8 +1005,8 @@ AC-1: PARTIAL.
 - Inspect src.txt and complete the source behavior fix; this is advisory, not assignment.
 `
       },
-      spawnSync(command, args, options) {
-        calls.push({ command, args, input: options.input })
+      spawnSync(command, args) {
+        calls.push({ command, args, input: opencodePromptArg(args) })
         appendFileSync(join(project, "src.txt"), "worker change\n", "utf-8")
         return { status: 0, stdout: "worker exited without idle review\n", stderr: "" }
       },
@@ -776,6 +1038,72 @@ AC-1: PARTIAL.
     expect(readFileSync(join(loopDir, "round-01-trajectory.json"), "utf-8")).toContain(
       "worker exited without idle review",
     )
+  })
+
+  test("opencode-cli reviewer runs through OpenCode with a positional prompt", () => {
+    const project = tempGitProject()
+    const calls: Array<{ command: string; args: string[]; prompt: string; stdin?: string }> = []
+    let loopDir = ""
+
+    const result = runPactDriver({
+      projectRoot: project,
+      planFile: join(project, "plan.md"),
+      model: "openrouter/z-ai/glm-5.2",
+      maxRounds: 1,
+      opencodeCommand: "fake-opencode",
+      reviewerBackend: "opencode-cli",
+      reviewerModel: "openrouter/z-ai/glm-5.2",
+      maxInvocations: 1,
+      planner(_prompt, context) {
+        loopDir = context.loopDir
+        return validPlannerOutput()
+      },
+      spawnSync(command, args, options) {
+        const prompt = opencodePromptArg(args)
+        calls.push({ command, args, prompt, stdin: options.input })
+        if (prompt.startsWith("# PACT Review Round")) {
+          return {
+            status: 0,
+            stdout: `### Decision Summary
+Continue after factual artifact inspection.
+`,
+            stderr: "",
+          }
+        }
+        appendFileSync(join(project, "src.txt"), "worker change\n", "utf-8")
+        writeFileSync(join(loopDir, "round-01-summary.md"), "Worker changed src.txt.\n", "utf-8")
+        return { status: 0, stdout: "worker run\n", stderr: "" }
+      },
+    })
+
+    expect(result.status).toBe("stopped")
+    expect(calls).toHaveLength(2)
+    expect(opencodeBaseArgs(calls[0]?.args ?? [])).toEqual([
+      "run",
+      "--dangerously-skip-permissions",
+      "-m",
+      "openrouter/z-ai/glm-5.2",
+    ])
+    expect(calls[0]?.prompt).toContain("# PACT Round 01")
+    expect(calls[0]?.stdin).toBe("")
+    expect(opencodeBaseArgs(calls[1]?.args ?? [])).toEqual([
+      "run",
+      "--dangerously-skip-permissions",
+      "-m",
+      "openrouter/z-ai/glm-5.2",
+      "--agent",
+      "pact-reviewer",
+    ])
+    expect(calls[1]?.prompt).toContain("# PACT Review Round 01")
+    expect(calls[1]?.stdin).toBe("")
+    expect(readFileSync(join(loopDir, "round-01-review.md"), "utf-8")).toContain(
+      "Continue after factual artifact inspection",
+    )
+    expect(JSON.parse(readFileSync(join(loopDir, "round-01-result.json"), "utf-8"))).toMatchObject({
+      reviewer_backend: "opencode-cli",
+      reviewer_model: "openrouter/z-ai/glm-5.2",
+      worker_model: "openrouter/z-ai/glm-5.2",
+    })
   })
 
   test("failed public verification blocks reviewer-approved completion ledger updates", () => {
@@ -1078,9 +1406,128 @@ Continue.
     expect(logs.join("\n")).not.toContain("secret-value")
   })
 
+  test("passes configured OpenCode run timeout to worker invocations", () => {
+    const project = tempGitProject()
+    const timeouts: Array<number | undefined> = []
+    const previousTimeout = process.env.PACT_OPENCODE_RUN_TIMEOUT_MS
+    process.env.PACT_OPENCODE_RUN_TIMEOUT_MS = "1234"
+    try {
+      const result = runPactDriver({
+        projectRoot: project,
+        planFile: join(project, "plan.md"),
+        model: "openrouter/z-ai/glm-5.2",
+        maxRounds: 1,
+        opencodeCommand: "fake-opencode",
+        maxInvocations: 1,
+        planner() {
+          return validPlannerOutput()
+        },
+        reviewer() {
+          return "Continue.\n"
+        },
+        spawnSync(_command, _args, options) {
+          timeouts.push(options.timeout)
+          appendFileSync(join(project, "src.txt"), "worker change\n", "utf-8")
+          return { status: 0, stdout: "worker\n", stderr: "" }
+        },
+      })
+
+      expect(result.status).toBe("stopped")
+      expect(timeouts).toEqual([1234])
+    } finally {
+      if (previousTimeout === undefined) delete process.env.PACT_OPENCODE_RUN_TIMEOUT_MS
+      else process.env.PACT_OPENCODE_RUN_TIMEOUT_MS = previousTimeout
+    }
+  })
+
+  test("default OpenCode runner times out hung commands", () => {
+    const project = tempGitProject()
+    const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-timeout-bin-"))
+    tempDirs.push(binDir)
+    const fakeOpencode = join(binDir, "fake-opencode")
+    writeFileSync(fakeOpencode, "#!/bin/sh\nsleep 5\n", "utf-8")
+    chmodSync(fakeOpencode, 0o755)
+    const previousTimeout = process.env.PACT_OPENCODE_RUN_TIMEOUT_MS
+    process.env.PACT_OPENCODE_RUN_TIMEOUT_MS = "100"
+    const logs: string[] = []
+    try {
+      const result = runPactDriver({
+        projectRoot: project,
+        planFile: join(project, "plan.md"),
+        model: "openrouter/z-ai/glm-5.2",
+        maxRounds: 1,
+        opencodeCommand: fakeOpencode,
+        maxInvocations: 1,
+        planner() {
+          return validPlannerOutput()
+        },
+        log(message) {
+          logs.push(message)
+        },
+      })
+
+      expect(result.status).toBe("opencode_failed")
+      expect(logs.join("\n")).toContain("timed out")
+    } finally {
+      if (previousTimeout === undefined) delete process.env.PACT_OPENCODE_RUN_TIMEOUT_MS
+      else process.env.PACT_OPENCODE_RUN_TIMEOUT_MS = previousTimeout
+    }
+  })
+
+  test("docker worker timeout performs outer container cleanup", () => {
+    const project = tempGitProject()
+    const binDir = mkdtempSync(join(tmpdir(), "pact-docker-timeout-bin-"))
+    tempDirs.push(binDir)
+    const fakeDocker = join(binDir, "docker")
+    const logPath = join(binDir, "docker.log")
+    writeFileSync(logPath, "", "utf-8")
+    writeFileSync(
+      fakeDocker,
+      `#!/bin/sh
+echo "$@" >> ${JSON.stringify(logPath)}
+if [ "$1" = "run" ]; then
+  cat >/dev/null &
+  sleep 5
+  exit 0
+fi
+exit 0
+`,
+      "utf-8",
+    )
+    chmodSync(fakeDocker, 0o755)
+    const previousTimeout = process.env.PACT_OPENCODE_RUN_TIMEOUT_MS
+    const previousPath = process.env.PATH
+    process.env.PACT_OPENCODE_RUN_TIMEOUT_MS = "1000"
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`
+    try {
+      const result = runPactDriver({
+        projectRoot: project,
+        planFile: join(project, "plan.md"),
+        model: "openrouter/z-ai/glm-5.2",
+        maxRounds: 1,
+        workerRunner: "docker",
+        workerContainerImage: "lolbench/cpython-agent:1",
+        dockerCommand: "docker",
+        maxInvocations: 1,
+        planner() {
+          return validPlannerOutput()
+        },
+      })
+
+      expect(result.status).toBe("opencode_failed")
+      const logText = readFileSync(logPath, "utf-8")
+      expect(logText).toContain("rm -f pact-worker-")
+    } finally {
+      if (previousTimeout === undefined) delete process.env.PACT_OPENCODE_RUN_TIMEOUT_MS
+      else process.env.PACT_OPENCODE_RUN_TIMEOUT_MS = previousTimeout
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+    }
+  })
+
   test("can explicitly opt in to same-session continuation", () => {
     const project = tempGitProject()
-    const calls: Array<{ args: string[]; input: string }> = []
+    const calls: Array<{ args: string[]; input: string; stdin?: string }> = []
     let loopDir = ""
 
     const result = runPactDriver({
@@ -1096,7 +1543,7 @@ Continue.
         return validPlannerOutput()
       },
       spawnSync(_command, args, options) {
-        calls.push({ args, input: options.input })
+        calls.push({ args, input: opencodePromptArg(args), stdin: options.input })
         if (calls.length === 1) {
           const state = readState(loopDir)
           state.current_round = 2
@@ -1116,7 +1563,7 @@ Continue.
     })
 
     expect(result.status).toBe("complete")
-    expect(calls[1]?.args).toEqual([
+    expect(opencodeBaseArgs(calls[1]?.args ?? [])).toEqual([
       "run",
       "--dangerously-skip-permissions",
       "-m",
@@ -1124,6 +1571,8 @@ Continue.
       "-s",
       "ses_worker",
     ])
+    expect(calls[1]?.input).toBe("same session prompt\n")
+    expect(calls[1]?.stdin).toBe("")
   })
 
   test("does not reuse a stale loop when driver-owned planner fails", () => {

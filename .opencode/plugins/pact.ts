@@ -23,6 +23,7 @@ import {
   findActiveLoop,
   artifactPaths,
   isProtectedWrite,
+  loadPactHarness,
   parsePlannerArtifacts,
   readState,
   redactText,
@@ -82,6 +83,7 @@ export type PactPluginOptions = {
   benchmarkStrictNetwork?: boolean
   verificationCommand?: string
   verificationTimeoutMs?: number
+  harnessDir?: string
 }
 
 type PromptClient = {
@@ -109,6 +111,7 @@ export const PACT_PLUGIN_DEFAULTS = {
   sessionStrategy: "new-per-round" as SessionStrategy,
   roundBoundary: "session_idle" as RoundBoundary,
   trajectoryMode: "full-redact" as TrajectoryMode,
+  harnessDir: undefined as string | undefined,
 }
 
 export const PactPlugin: Plugin = async ({ client, directory, worktree }, options?: PactPluginOptions) => {
@@ -137,6 +140,7 @@ export const PactPlugin: Plugin = async ({ client, directory, worktree }, option
           full_alignment_interval: tool.schema.number().optional(),
           verification_command: tool.schema.string().optional(),
           verification_timeout_ms: tool.schema.number().optional(),
+          harness_dir: tool.schema.string().optional(),
         },
         async execute(args, context) {
           const plannerBackend = args.planner_backend ?? cfg.plannerBackend
@@ -152,6 +156,7 @@ export const PactPlugin: Plugin = async ({ client, directory, worktree }, option
           const trajectoryMode = args.trajectory_mode ?? cfg.trajectoryMode ?? PACT_PLUGIN_DEFAULTS.trajectoryMode
           const verificationCommand = args.verification_command ?? cfg.verificationCommand
           const verificationTimeoutMs = args.verification_timeout_ms ?? cfg.verificationTimeoutMs
+          const harness = loadPactHarness(args.harness_dir ?? cfg.harnessDir ?? process.env.PACT_HARNESS_DIR)
           const loop = createLoop({
             projectRoot: context.worktree || context.directory || projectRoot,
             planFile: args.plan_file,
@@ -170,11 +175,12 @@ export const PactPlugin: Plugin = async ({ client, directory, worktree }, option
             fullAlignmentInterval: args.full_alignment_interval ?? cfg.fullAlignmentInterval,
             verificationCommand,
             verificationTimeoutMs,
+            harnessDir: harness?.dir,
           })
           const planContent = readFileSync(join(loop.loopDir, "source-plan.md"), "utf-8")
 
           try {
-            const plannerPrompt = buildPlannerPrompt({ planPath: args.plan_file, planContent })
+            const plannerPrompt = buildPlannerPrompt({ planPath: args.plan_file, planContent, harness })
             writeFileSync(join(loop.loopDir, "round-00-plan-prompt.md"), plannerPrompt, "utf-8")
             let plannerText = await invokePlannerBackend({
               client: promptClient,
@@ -259,6 +265,7 @@ export const PactPlugin: Plugin = async ({ client, directory, worktree }, option
             round: 1,
             todoPath: join(loop.loopDir, "todo.md"),
             goalTrackerPath: join(loop.loopDir, "goal-tracker.md"),
+            harness,
           })
           writeRoundStartArtifacts({
             loopDir: loop.loopDir,
@@ -597,6 +604,7 @@ Goal tracker: ${join(loop.loopDir, "goal-tracker.md")}
           sessionID: workingState.active_session_id,
           data: { summary_path: currentSummaryPath, review_kind: reviewKind },
         })
+        const harness = loadPactHarness(workingState.harness_dir ?? cfg.harnessDir ?? process.env.PACT_HARNESS_DIR)
         const reviewPrompt = buildReviewPrompt({
           loopDir: loop.loopDir,
           round,
@@ -606,6 +614,7 @@ Goal tracker: ${join(loop.loopDir, "goal-tracker.md")}
           patchArtifactPath: join(loop.loopDir, `round-${roundName(round)}-patch-artifact.json`),
           verificationPath: verification ? artifactPaths(loop.loopDir, round).verification : undefined,
           reviewKind,
+          harness,
         })
         writeFileSync(join(loop.loopDir, `round-${roundName(round)}-review-prompt.md`), reviewPrompt, "utf-8")
         let reviewText: string
@@ -1185,15 +1194,17 @@ async function maybePromptNextPhase(
   if (state.status !== "running") return
   const feedbackPath = join(loopDir, `round-${roundName(reviewedRound)}-feedback.md`)
   const goalTrackerPath = join(loopDir, "goal-tracker.md")
+  const harness = loadPactHarness(state.harness_dir ?? cfg.harnessDir ?? process.env.PACT_HARNESS_DIR)
   let prompt: string | undefined
   if (state.phase === "finalize") {
-    prompt = buildFinalizePrompt({ loopDir, round: state.current_round, goalTrackerPath })
+    prompt = buildFinalizePrompt({ loopDir, round: state.current_round, goalTrackerPath, harness })
   } else if (state.phase === "review") {
     prompt = buildReviewPhasePrompt({
       loopDir,
       round: state.current_round,
       feedbackPath,
       goalTrackerPath,
+      harness,
     })
   } else if (state.phase === "implementation") {
     const continuationPackagePath = artifactPaths(loopDir, reviewedRound).continuationPackage
@@ -1203,6 +1214,7 @@ async function maybePromptNextPhase(
       feedbackPath,
       goalTrackerPath,
       continuationPackagePath,
+      harness,
     })
   }
   if (!prompt) return
@@ -1253,10 +1265,11 @@ async function handleFinalizeIdle(input: {
 }): Promise<void> {
   const finalizeSummaryPath = join(input.loopDir, "finalize-summary.md")
   const goalTrackerPath = join(input.loopDir, "goal-tracker.md")
+  const harness = loadPactHarness(input.state.harness_dir ?? input.cfg.harnessDir ?? process.env.PACT_HARNESS_DIR)
   if (!existsSync(finalizeSummaryPath)) {
     const promptPath = join(input.loopDir, `round-${roundName(input.round)}-prompt.md`)
     if (!existsSync(promptPath) && input.state.active_session_id) {
-      const prompt = buildFinalizePrompt({ loopDir: input.loopDir, round: input.round, goalTrackerPath })
+      const prompt = buildFinalizePrompt({ loopDir: input.loopDir, round: input.round, goalTrackerPath, harness })
       writeRoundStartArtifacts({
         loopDir: input.loopDir,
         loopID: input.state.loop_id,

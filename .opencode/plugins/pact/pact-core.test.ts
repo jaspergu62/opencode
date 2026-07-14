@@ -24,12 +24,14 @@ import {
   exportReplayCase,
   isImmutableGoalTrackerEdit,
   isProtectedWrite,
+  loadPactHarness,
   normalizePlanLedger,
   parsePlannerArtifacts,
   parseReviewDecision,
   readState,
   recordReviewDecision,
   redactText,
+  renderPactHarnessTemplate,
   writeContinuationPackage,
   writeVerificationArtifact,
   extractPatchChangedPaths,
@@ -73,6 +75,70 @@ function tempGitProject(): string {
 }
 
 describe("artifact helpers", () => {
+  test("loads a v1 harness manifest and renders controlled templates", () => {
+    const project = tempProject()
+    const harnessDir = join(project, "pact-harness")
+    mkdirSync(harnessDir)
+    writeFileSync(
+      join(harnessDir, "manifest.json"),
+      JSON.stringify(
+        {
+          schema: "pact-harness/v1",
+          id: "unit-harness",
+          templates: {
+            planner: "planner.md",
+          },
+          goal_tracker_schema: "goal-tracker-schema.md",
+          spec_import_profile: "spec-import-profile.json",
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf-8",
+    )
+    writeFileSync(join(harnessDir, "planner.md"), "Plan {{planPath}}\n{{planContent}}\n{{goalTrackerSchema}}", "utf-8")
+    writeFileSync(join(harnessDir, "goal-tracker-schema.md"), "schema rules", "utf-8")
+    writeFileSync(join(harnessDir, "spec-import-profile.json"), '{"mode":"strict"}\n', "utf-8")
+
+    const harness = loadPactHarness(harnessDir)
+
+    expect(harness?.manifest.id).toBe("unit-harness")
+    expect(harness?.goalTrackerSchema).toBe("schema rules")
+    expect(harness?.specImportProfile).toEqual({ mode: "strict" })
+    expect(
+      renderPactHarnessTemplate(harness.templates.planner ?? "", {
+        planPath: "plan.md",
+        planContent: "body",
+        goalTrackerSchema: harness.goalTrackerSchema ?? "",
+      }),
+    ).toBe("Plan plan.md\nbody\nschema rules")
+  })
+
+  test("rejects harness templates with unknown placeholders", () => {
+    expect(() =>
+      renderPactHarnessTemplate("Use {{planPath}} and {{unknown}}", {
+        planPath: "plan.md",
+      }),
+    ).toThrow("Unsupported PACT harness placeholder: unknown")
+  })
+
+  test("harness templates can wrap the default prompt without replacing it", () => {
+    const prompt = buildPlannerPrompt({
+      planPath: "plan.md",
+      planContent: "# Plan\nFix it.\n",
+      harness: {
+        dir: "/tmp/harness",
+        manifest: { schema: "pact-harness/v1", id: "wrapper" },
+        templates: { planner: "{{defaultPrompt}}\n\n## Overlay\n{{goalTrackerSchema}}\n" },
+        goalTrackerSchema: "Use reviewer-owned mutable ledgers.",
+      },
+    })
+
+    expect(prompt).toContain("# PACT Planner")
+    expect(prompt).toContain("## Overlay")
+    expect(prompt).toContain("Use reviewer-owned mutable ledgers.")
+  })
+
   test("builds stable artifact paths for padded rounds", () => {
     expect(artifactPaths("/tmp/loop", 1)).toMatchObject({
       loopManifest: "/tmp/loop/loop-manifest.json",

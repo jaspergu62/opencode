@@ -108,6 +108,113 @@ function writeSyntheticBundle(
   }
 }
 
+function writeSyntheticSurfaceBundle(bundleDir: string, kind: "tomllib" | "variadic"): void {
+  const sectionsDir = join(bundleDir, "enhanced_requirement_sections")
+  mkdirSync(sectionsDir, { recursive: true })
+  writeFileSync(join(sectionsDir, "01_problem_understanding.md"), `## Problem Understanding\n${kind}\n`, "utf-8")
+  writeFileSync(
+    join(sectionsDir, "08_implementation_anchors.md"),
+    kind === "tomllib"
+      ? "## Implementation Anchors\n- `Lib/tomllib`\n- `Python/stdlib_module_names.h`\n"
+      : "## Implementation Anchors\n- `Grammar/python.gram`\n- `Parser/parser.c`\n- `Python/compile.c`\n- `Lib/typing.py`\n",
+    "utf-8",
+  )
+  writeFileSync(
+    join(sectionsDir, "09_decomposed_implementation_steps.md"),
+    kind === "tomllib"
+      ? `## Decomposed Implementation Steps
+- [ ] \`STEP-001\` Add tomllib stdlib module [REQ-001]
+  Group: GRP-001; depends_on: none
+  Action: Add the top-level tomllib module as a pure-Python standard-library package.
+  Rationale: PEP 680 adds tomllib.
+  Anchors: Lib/tomllib, Python/stdlib_module_names.h
+  Checks: import tomllib works; sys.stdlib_module_names includes tomllib when generated metadata is used.
+  Risk if skipped: The new standard-library module is not importable.
+  Confidence: 1.0; source=original_req; hard_requirement=True
+- [ ] \`STEP-002\` Preserve tomli parser structure [REQ-002]
+  Group: GRP-001; depends_on: STEP-001
+  Action: Base the parser on pure-Python tomli behavior, keeping parser, regex, and type helper surfaces coherent.
+  Rationale: The proposal names tomli as the implementation basis.
+  Anchors: Lib/tomllib/_parser.py, Lib/tomllib/_re.py, Lib/tomllib/_types.py
+  Checks: TOML 1.0.0 data corpus parses; invalid TOML raises TOMLDecodeError.
+  Risk if skipped: A bespoke parser can pass examples while missing compliance behavior.
+  Confidence: 0.95; source=original_req; hard_requirement=True
+`
+      : `## Decomposed Implementation Steps
+- [ ] \`STEP-001\` Add variadic generic syntax [REQ-001]
+  Group: GRP-001; depends_on: none
+  Action: Edit grammar, generated parser, compiler, typing, and AST/unparse surfaces for starred subscription indexes and vararg star annotations.
+  Rationale: PEP 646 couples parser, compiler, typing, and unparse behavior.
+  Anchors: Grammar/python.gram, Parser/parser.c, Python/compile.c, Lib/typing.py, Lib/ast.py, Python/ast_unparse.c
+  Checks: TypeVarTuple, Unpack, future annotations, and ast.unparse behavior work.
+  Risk if skipped: Parser changes pass while typing or unparse behavior remains incomplete.
+  Confidence: 1.0; source=original_req; hard_requirement=True
+`,
+    "utf-8",
+  )
+  writeFileSync(
+    join(sectionsDir, "12_repo_inferred_obligations.md"),
+    kind === "tomllib"
+      ? `## Repo-Inferred Obligations
+- **Obligation**: tomllib should be importable as a top-level standard-library module.
+  Anchors: Lib/tomllib, Python/stdlib_module_names.h
+  Confidence: 0.9; source=codebase_analysis; hard_requirement=True
+`
+      : `## Repo-Inferred Obligations
+- **Obligation**: New public typing constructs should be importable from typing and participate in future annotations and unparse conventions.
+  Anchors: Lib/typing.py, Lib/ast.py, Python/ast_unparse.c
+  Confidence: 0.9; source=repo_context; hard_requirement=True
+`,
+    "utf-8",
+  )
+  writeFileSync(
+    join(sectionsDir, "13_formal_verification_checklist.md"),
+    kind === "tomllib"
+      ? "## Formal Verification Checklist\n- tomllib follows tomli-derived TOML 1.0.0 behavior.\n"
+      : "## Formal Verification Checklist\n- TypeVarTuple, Unpack, future annotations, and ast.unparse all work.\n",
+    "utf-8",
+  )
+  writeFileSync(
+    join(sectionsDir, "15_decomposed_requirements.md"),
+    kind === "tomllib"
+      ? "## Decomposed Requirements\n- **tomllib API** [REQ-001]: Add tomllib.load, tomllib.loads, and TOMLDecodeError.\n- **tomli parity** [REQ-002]: Preserve tomli-derived parser compliance.\n"
+      : "## Decomposed Requirements\n- **Variadic syntax and typing** [REQ-001]: Parser, compiler, typing, and unparse behavior are coherent.\n",
+    "utf-8",
+  )
+  writeFileSync(join(sectionsDir, "20_edge_cases.md"), "## Edge Cases\n- Hidden corpus behavior stays covered.\n", "utf-8")
+  writeFileSync(join(sectionsDir, "21_anti_patterns.md"), "## Anti-Patterns\n- Do not accept no-diff claims without source evidence.\n", "utf-8")
+  writeFileSync(
+    join(sectionsDir, "29_original_requirement.md"),
+    kind === "tomllib"
+      ? "## Original Requirement\nAdd tomllib to the standard library based on tomli.\n"
+      : "## Original Requirement\nImplement PEP 646 variadic generics in CPython.\n",
+    "utf-8",
+  )
+  writeFileSync(
+    join(sectionsDir, "41_semantic_search_code_localization.md"),
+    kind === "tomllib"
+      ? `## Semantic Search Code Localization Supplement
+
+## Semantic Search Source: Likely Implementation Surfaces
+- Source: original_requirement. Evidence: \`Lib/tomllib/_parser.py\`. Confidence: high. Action: likely edit for parser.
+- Source: original_requirement. Evidence: \`Lib/tomllib/_re.py\`. Confidence: high. Action: likely edit for regex helpers.
+- Source: original_requirement. Evidence: \`Lib/tomllib/_types.py\`. Confidence: high. Action: likely edit for helper typing aliases.
+- Source: inferred. Evidence: \`Python/stdlib_module_names.h\`. Confidence: high. Action: stdlib registration.
+`
+      : `## Semantic Search Code Localization Supplement
+
+## Semantic Search Source: Likely Implementation Surfaces
+- Source: code_evidence. Evidence: \`Grammar/python.gram\`. Confidence: high. Action: Required grammar edit.
+- Source: inferred. Evidence: \`Parser/parser.c\`. Confidence: high. Action: Required generated update.
+- Source: inferred. Evidence: \`Python/compile.c\`. Confidence: high. Action: Required compiler update.
+- Source: inferred. Evidence: \`Lib/typing.py\`. Confidence: high. Action: Required typing update.
+- Source: inferred. Evidence: \`Lib/ast.py\`. Confidence: high. Action: Required pure-Python unparse update.
+- Source: inferred. Evidence: \`Python/ast_unparse.c\`. Confidence: high. Action: Required C unparse update.
+`,
+    "utf-8",
+  )
+}
+
 const realBundleTest = existsSync(pep709Bundle) ? test : test.skip
 const allCpythonBundlesTest = existsSync(cpythonTrialBundleRoot) ? test : test.skip
 
@@ -189,6 +296,72 @@ describe("PACT spec importer", () => {
     expect(readFileSync(join(outputLoopDir, "reviewer-audit-checklist.md"), "utf-8")).toContain(
       "Base-Equivalence Proof Audit",
     )
+  })
+
+  test("infers hard tomli-derived helper surfaces for a tomllib stdlib module import", () => {
+    const projectRoot = tempDir("pact-spec-project-")
+    const planFile = join(projectRoot, "prompt.md")
+    writeFileSync(planFile, "Original LoLBench prompt placeholder.\n", "utf-8")
+    const bundleDir = tempDir("pact-tomllib-surface-bundle-")
+    writeSyntheticSurfaceBundle(bundleDir, "tomllib")
+    const outputLoopDir = join(projectRoot, ".pact", "loops", "spec-import-tomllib-surfaces-test")
+
+    importSpecBundle({
+      bundleDir,
+      outputLoopDir,
+      projectRoot,
+      planFile,
+      loopID: "spec-import-tomllib-surfaces-test",
+      maxRounds: 5,
+      now: new Date("2026-07-04T00:00:00.000Z"),
+    })
+
+    const surfaces = JSON.parse(readFileSync(join(outputLoopDir, "target-surfaces.json"), "utf-8"))
+    expect(surfaces.surfaces).toContainEqual(
+      expect.objectContaining({ path: "Lib/tomllib/_parser.py", priority: "High", hard_status_gate: true }),
+    )
+    expect(surfaces.surfaces).toContainEqual(
+      expect.objectContaining({ path: "Lib/tomllib/_re.py", priority: "High", hard_status_gate: true }),
+    )
+    expect(surfaces.surfaces).toContainEqual(
+      expect.objectContaining({ path: "Lib/tomllib/_types.py", priority: "High", hard_status_gate: true }),
+    )
+    expect(readFileSync(join(outputLoopDir, "target-surface-contract.md"), "utf-8")).toContain(
+      "tomli-derived parser parity",
+    )
+  })
+
+  test("promotes coupled variadic generics parser, typing, and unparse surfaces to hard high priority", () => {
+    const projectRoot = tempDir("pact-spec-project-")
+    const planFile = join(projectRoot, "prompt.md")
+    writeFileSync(planFile, "Original LoLBench prompt placeholder.\n", "utf-8")
+    const bundleDir = tempDir("pact-variadic-surface-bundle-")
+    writeSyntheticSurfaceBundle(bundleDir, "variadic")
+    const outputLoopDir = join(projectRoot, ".pact", "loops", "spec-import-variadic-surfaces-test")
+
+    importSpecBundle({
+      bundleDir,
+      outputLoopDir,
+      projectRoot,
+      planFile,
+      loopID: "spec-import-variadic-surfaces-test",
+      maxRounds: 5,
+      now: new Date("2026-07-04T00:00:00.000Z"),
+    })
+
+    const surfaces = JSON.parse(readFileSync(join(outputLoopDir, "target-surfaces.json"), "utf-8"))
+    for (const path of [
+      "Grammar/python.gram",
+      "Parser/parser.c",
+      "Python/compile.c",
+      "Lib/typing.py",
+      "Lib/ast.py",
+      "Python/ast_unparse.c",
+    ]) {
+      expect(surfaces.surfaces).toContainEqual(
+        expect.objectContaining({ path, priority: "High", hard_status_gate: true }),
+      )
+    }
   })
 
   test("falls back to implementation steps when decomposed requirements are delivery-only", () => {

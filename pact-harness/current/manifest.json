@@ -1,0 +1,15 @@
+{
+  "schema": "pact-harness/v1",
+  "id": "pact-current",
+  "description": "Baseline PACT harness overlay for workflow/schema evolution. Templates wrap the built-in prompts via {{defaultPrompt}}.",
+  "templates": {
+    "planner": "templates/planner.md",
+    "initial_worker": "templates/initial-worker.md",
+    "continuation_worker": "templates/continuation-worker.md",
+    "review": "templates/review.md",
+    "review_phase": "templates/review-phase.md",
+    "finalize": "templates/finalize.md"
+  },
+  "goal_tracker_schema": "goal-tracker-schema.md",
+  "spec_import_profile": "spec-import-profile.json"
+}

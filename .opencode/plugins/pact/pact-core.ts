@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 
-export type PlannerBackend = "opencode-agent" | "opencode-cli" | "codex-cli" | "spec-import"
+export type PlannerBackend = "opencode-agent" | "opencode-cli" | "codex-cli" | "openrouter-chat" | "spec-import"
 export type ReviewerBackend = "opencode-agent" | "opencode-cli" | "codex-cli"
 export type WorkerBackend = "opencode-cli"
 export type LoopStatus = "running" | "complete" | "stopped" | "cancelled"
@@ -21,6 +21,7 @@ export type ReviewMarker = "complete" | "continue"
 export type SessionStrategy = "new-per-round" | "same-session"
 export type TrajectoryMode = "structured" | "full-redact"
 export type RoundBoundary = "session_idle" | "run_exit"
+export type ModelReasoningEffort = "xhigh" | "high" | "medium" | "low"
 
 export type PactState = {
   version: 1 | 2
@@ -46,11 +47,14 @@ export type PactState = {
   trajectory_mode?: TrajectoryMode
   planner_backend: PlannerBackend
   planner_model?: string | null
+  planner_effort?: ModelReasoningEffort | null
   reviewer_backend: ReviewerBackend
   reviewer_model?: string | null
+  reviewer_effort?: ModelReasoningEffort | null
   worker_backend?: string
   worker_model?: string | null
   worker_config_source?: string | null
+  harness_dir?: string
   verification_command?: string
   verification_timeout_ms?: number
   goal_tracker_immutable_sha256?: string
@@ -80,11 +84,14 @@ export type CreateLoopInput = {
   maxRounds?: number
   plannerBackend?: PlannerBackend
   plannerModel?: string | null
+  plannerEffort?: ModelReasoningEffort | null
   reviewerBackend?: ReviewerBackend
   reviewerModel?: string | null
+  reviewerEffort?: ModelReasoningEffort | null
   workerBackend?: string
   workerModel?: string | null
   workerConfigSource?: string | null
+  harnessDir?: string
   workerSessionID?: string
   sessionStrategy?: SessionStrategy
   roundBoundary?: RoundBoundary
@@ -184,6 +191,31 @@ export type ArtifactPaths = {
   roundResult: string
   roundReplayCase: string
   replayCase: string
+}
+
+export type PactHarnessTemplateName =
+  | "planner"
+  | "initial_worker"
+  | "continuation_worker"
+  | "review"
+  | "review_phase"
+  | "finalize"
+
+export type PactHarnessManifest = {
+  schema: "pact-harness/v1"
+  id: string
+  description?: string
+  templates?: Partial<Record<PactHarnessTemplateName, string>>
+  goal_tracker_schema?: string
+  spec_import_profile?: string
+}
+
+export type PactHarness = {
+  dir: string
+  manifest: PactHarnessManifest
+  templates: Partial<Record<PactHarnessTemplateName, string>>
+  goalTrackerSchema?: string
+  specImportProfile?: Record<string, unknown>
 }
 
 export type RoundPhase =
@@ -569,6 +601,53 @@ export function appendJsonLine(filePath: string, value: unknown): void {
   appendFileSync(filePath, JSON.stringify(value) + "\n", "utf-8")
 }
 
+export function loadPactHarness(harnessDir: string | undefined): PactHarness | undefined {
+  if (!harnessDir) return undefined
+  const dir = resolve(harnessDir)
+  const manifestPath = join(dir, "manifest.json")
+  if (!existsSync(manifestPath)) throw new Error(`PACT harness manifest not found: ${manifestPath}`)
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as PactHarnessManifest
+  if (manifest.schema !== "pact-harness/v1") {
+    throw new Error(`Unsupported PACT harness schema: ${String((manifest as Record<string, unknown>).schema)}`)
+  }
+  if (!manifest.id) throw new Error("PACT harness manifest must include id")
+  const templates = Object.fromEntries(
+    Object.entries(manifest.templates ?? {}).map(([name, relativePath]) => {
+      if (!isPactHarnessTemplateName(name)) throw new Error(`Unsupported PACT harness template: ${name}`)
+      if (typeof relativePath !== "string" || !relativePath) {
+        throw new Error(`PACT harness template path is invalid for ${name}`)
+      }
+      const templatePath = join(dir, relativePath)
+      if (!existsSync(templatePath)) throw new Error(`PACT harness template not found: ${templatePath}`)
+      return [name, readFileSync(templatePath, "utf-8")]
+    }),
+  ) as Partial<Record<PactHarnessTemplateName, string>>
+  const goalTrackerSchema = manifest.goal_tracker_schema
+    ? readFileSync(join(dir, manifest.goal_tracker_schema), "utf-8").trim()
+    : undefined
+  const specImportProfile = manifest.spec_import_profile
+    ? (JSON.parse(readFileSync(join(dir, manifest.spec_import_profile), "utf-8")) as Record<string, unknown>)
+    : undefined
+  return {
+    dir,
+    manifest,
+    templates,
+    goalTrackerSchema,
+    specImportProfile,
+  }
+}
+
+export function renderPactHarnessTemplate(
+  template: string,
+  values: Record<string, string | number | boolean | null | undefined>,
+): string {
+  return template.replace(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g, (_match, key: string) => {
+    if (!(key in values)) throw new Error(`Unsupported PACT harness placeholder: ${key}`)
+    const value = values[key]
+    return value === undefined || value === null ? "" : String(value)
+  })
+}
+
 export function ensureGitInfoExclude(projectRoot: string, pattern = ".pact/"): boolean {
   try {
     const rawExcludePath = gitStdout(projectRoot, ["rev-parse", "--git-path", "info/exclude"]).trim()
@@ -705,11 +784,14 @@ export function createLoop(input: CreateLoopInput): LoopInfo {
     trajectory_mode: trajectoryMode,
     planner_backend: input.plannerBackend ?? "codex-cli",
     planner_model: input.plannerModel,
+    planner_effort: input.plannerEffort,
     reviewer_backend: input.reviewerBackend ?? "codex-cli",
     reviewer_model: input.reviewerModel,
+    reviewer_effort: input.reviewerEffort,
     worker_backend: input.workerBackend,
     worker_model: input.workerModel,
     worker_config_source: input.workerConfigSource,
+    harness_dir: input.harnessDir,
     verification_command: input.verificationCommand,
     verification_timeout_ms: input.verificationTimeoutMs,
     goal_tracker_immutable_sha256: goalTrackerImmutableSha,
@@ -753,6 +835,7 @@ export function createLoop(input: CreateLoopInput): LoopInfo {
     worker_backend: state.worker_backend,
     worker_model: state.worker_model,
     worker_config_source: state.worker_config_source,
+    harness_dir: state.harness_dir,
     verification_enabled: Boolean(state.verification_command),
     verification_command: state.verification_command,
     verification_timeout_ms: state.verification_timeout_ms,
@@ -2264,12 +2347,19 @@ export function recordFailedReviewDecision(input: {
   const feedbackPath = join(input.loopDir, `round-${roundName(input.round)}-feedback.md`)
   const state = readState(input.loopDir)
   const errorSummary = safeErrorSummary(input.error)
-  const title = input.parseStatus === "reviewer_timeout" ? "Codex reviewer timed out" : "Codex reviewer failed"
+  const reviewerBackend = input.reviewerBackend ?? state.reviewer_backend
+  const reviewerName =
+    reviewerBackend === "codex-cli"
+      ? "Codex reviewer"
+      : reviewerBackend === "opencode-cli"
+        ? "OpenCode reviewer"
+        : "Reviewer"
+  const title = input.parseStatus === "reviewer_timeout" ? `${reviewerName} timed out` : `${reviewerName} failed`
   const reviewText = `# PACT Review Failed
 
 ${title}.
 
-Backend: ${input.reviewerBackend ?? state.reviewer_backend}
+Backend: ${reviewerBackend}
 Model: ${input.reviewerModel ?? state.reviewer_model ?? "(unset)"}
 Parse status: ${input.parseStatus}
 Error: ${errorSummary || "(none)"}
@@ -2311,7 +2401,7 @@ The loop was stopped so artifacts can be inspected and replayed.
       terminal_line: decision.terminalLine,
       review_path: reviewPath,
       feedback_path: feedbackPath,
-      reviewer_backend: input.reviewerBackend ?? state.reviewer_backend,
+      reviewer_backend: reviewerBackend,
       reviewer_model: input.reviewerModel ?? state.reviewer_model,
       resulting_status: state.status,
       resulting_phase: state.phase,
@@ -2355,8 +2445,8 @@ export function isImmutableGoalTrackerEdit(filePath: string, content: string): b
   return goalTrackerImmutableSha256(content) !== expected
 }
 
-export function buildPlannerPrompt(input: { planPath: string; planContent: string }): string {
-  return `# PACT Planner
+export function buildPlannerPrompt(input: { planPath: string; planContent: string; harness?: PactHarness }): string {
+  const defaultPrompt = `# PACT Planner
 
 Create a Humanize-style PACT plan ledger and goal tracker from the plan.
 
@@ -2439,6 +2529,16 @@ Return exactly three marker blocks:
 | --- | --- | --- | --- |
 <<<END_PACT_GOAL_TRACKER>>>
 `
+  const template = input.harness?.templates.planner
+  if (template) {
+    return renderPactHarnessTemplate(template, {
+      planPath: input.planPath,
+      planContent: input.planContent,
+      goalTrackerSchema: input.harness?.goalTrackerSchema,
+      defaultPrompt,
+    })
+  }
+  return defaultPrompt
 }
 
 export function buildInitialWorkerPrompt(input: {
@@ -2447,6 +2547,7 @@ export function buildInitialWorkerPrompt(input: {
   todoPath: string
   goalTrackerPath: string
   workerPath?: (path: string) => string
+  harness?: PactHarness
 }): string {
   const workerPath = input.workerPath ?? ((path: string) => path)
   const snapshot = buildCurrentStateSnapshot({
@@ -2456,7 +2557,7 @@ export function buildInitialWorkerPrompt(input: {
   const specEvidenceLines = specEvidenceReferenceLines(input.loopDir, workerPath)
   const summaryFile = workerPath(join(input.loopDir, `round-${roundName(input.round)}-summary.md`))
   const contractFile = workerPath(join(input.loopDir, `round-${roundName(input.round)}-contract.md`))
-  return `# PACT Round ${roundName(input.round)} Worker Prompt
+  const defaultPrompt = `# PACT Round ${roundName(input.round)} Worker Prompt
 
 ## Objective
 Complete the ultimate goal:
@@ -2519,6 +2620,25 @@ ${specEvidenceLines.join("\n")}
 
 The reviewer will inspect your summary and the repository state when this bounded run ends.
 `
+  const template = input.harness?.templates.initial_worker
+  if (template) {
+    return renderPactHarnessTemplate(template, {
+      loopDir: input.loopDir,
+      round: input.round,
+      roundName: roundName(input.round),
+      todoPath: workerPath(input.todoPath),
+      goalTrackerPath: workerPath(input.goalTrackerPath),
+      summaryPath: summaryFile,
+      contractPath: contractFile,
+      objective: snapshotObjective(input.loopDir),
+      currentStateSnapshot: snapshot,
+      specEvidenceReferences: specEvidenceLines.join("\n"),
+      preSnapshotPath: workerPath(artifactPaths(input.loopDir, input.round).preSnapshot),
+      goalTrackerSchema: input.harness?.goalTrackerSchema,
+      defaultPrompt,
+    })
+  }
+  return defaultPrompt
 }
 
 export function buildContinuationPrompt(input: {
@@ -2533,6 +2653,7 @@ export function buildContinuationPrompt(input: {
   continuationPackagePath?: string
   continuationPackageText?: string
   workerPath?: (path: string) => string
+  harness?: PactHarness
 }): string {
   const workerPath = input.workerPath ?? ((path: string) => path)
   const packageText =
@@ -2549,7 +2670,7 @@ export function buildContinuationPrompt(input: {
   const specEvidenceLines = specEvidenceReferenceLines(input.loopDir, workerPath)
   const summaryFile = workerPath(join(input.loopDir, `round-${roundName(input.round)}-summary.md`))
   const contractFile = workerPath(join(input.loopDir, `round-${roundName(input.round)}-contract.md`))
-  return `# PACT Round ${roundName(input.round)} Worker Prompt
+  const defaultPrompt = `# PACT Round ${roundName(input.round)} Worker Prompt
 
 The previous round did not pass review.
 
@@ -2615,6 +2736,30 @@ ${specEvidenceLines.join("\n")}
 - Pre-round snapshot: ${workerPath(input.preSnapshotPath ?? artifactPaths(input.loopDir, input.round).preSnapshot)}
 - Previous review feedback: ${workerPath(input.feedbackPath)}
 `
+  const template = input.harness?.templates.continuation_worker
+  if (template) {
+    return renderPactHarnessTemplate(template, {
+      loopDir: input.loopDir,
+      round: input.round,
+      roundName: roundName(input.round),
+      todoPath: workerPath(input.todoPath ?? join(input.loopDir, "todo.md")),
+      planPath: workerPath(input.planPath ?? join(input.loopDir, "plan.md")),
+      goalTrackerPath: workerPath(input.goalTrackerPath),
+      feedbackPath: workerPath(input.feedbackPath),
+      summaryPath: summaryFile,
+      contractPath: contractFile,
+      objective: snapshotObjective(input.loopDir, input.planPath),
+      currentStateSnapshot: snapshot.trim(),
+      continuationPackagePath: workerPath(
+        input.continuationPackagePath ?? artifactPaths(input.loopDir, Math.max(1, input.round - 1)).continuationPackage,
+      ),
+      specEvidenceReferences: specEvidenceLines.join("\n"),
+      preSnapshotPath: workerPath(input.preSnapshotPath ?? artifactPaths(input.loopDir, input.round).preSnapshot),
+      goalTrackerSchema: input.harness?.goalTrackerSchema,
+      defaultPrompt,
+    })
+  }
+  return defaultPrompt
 }
 
 export function buildReviewPrompt(input: {
@@ -2633,6 +2778,7 @@ export function buildReviewPrompt(input: {
   contract?: string
   contractStatus?: "present" | "missing"
   reviewKind?: "implementation" | "full_alignment" | "review"
+  harness?: PactHarness
 }): string {
   const kind = input.reviewKind ?? "implementation"
   const summaryStatus = input.summaryStatus ?? (input.summary.trim() ? "present" : "missing")
@@ -2662,7 +2808,7 @@ Focus on correctness, regressions, missing tests, and benchmark-facing patch qua
 `
       : ""
   const specEvidenceLines = specEvidenceReferenceLines(input.loopDir, (path) => path)
-  return `# PACT Review Round ${roundName(input.round)}
+  const defaultPrompt = `# PACT Review Round ${roundName(input.round)}
 
 You are the independent PACT reviewer.
 
@@ -2771,6 +2917,31 @@ If and only if you are about to write PACT_COMPLETE, summarize why every AC, har
 Only if all acceptance criteria and the current phase requirements are fully satisfied, write PACT_COMPLETE as the final non-empty line.
 For any other outcome, do not write a terminal marker. PACT_STOP and PACT_CONTINUE are deprecated and will be treated as continuation feedback.
 `
+  const template = input.harness?.templates.review
+  if (template) {
+    return renderPactHarnessTemplate(template, {
+      loopDir: input.loopDir,
+      round: input.round,
+      roundName: roundName(input.round),
+      reviewKind: kind,
+      planPath: input.planPath ?? join(input.loopDir, "plan.md"),
+      todoPath: input.todoPath ?? join(input.loopDir, "todo.md"),
+      goalTrackerPath: input.goalTrackerPath ?? join(input.loopDir, "goal-tracker.md"),
+      evalPatchPath: input.evalPatchPath ?? artifactPaths(input.loopDir, input.round).evalPatch,
+      patchArtifactPath: input.patchArtifactPath ?? artifactPaths(input.loopDir, input.round).patchArtifact,
+      verificationPath: input.verificationPath ?? artifactPaths(input.loopDir, input.round).verification,
+      summaryPath: input.summaryPath,
+      summaryStatus,
+      summary: summaryStatus === "present" ? input.summary : "(missing)",
+      contractPath,
+      contractStatus,
+      contract: contractStatus === "present" ? input.contract : "(missing)",
+      specEvidenceReferences: specEvidenceLines.join("\n"),
+      goalTrackerSchema: input.harness?.goalTrackerSchema,
+      defaultPrompt,
+    })
+  }
+  return defaultPrompt
 }
 
 export function buildReviewPhasePrompt(input: {
@@ -2779,9 +2950,10 @@ export function buildReviewPhasePrompt(input: {
   feedbackPath: string
   goalTrackerPath: string
   workerPath?: (path: string) => string
+  harness?: PactHarness
 }): string {
   const workerPath = input.workerPath ?? ((path: string) => path)
-  return `# PACT Review Phase ${roundName(input.round)}
+  const defaultPrompt = `# PACT Review Phase ${roundName(input.round)}
 
 The implementation phase has passed its reviewer gate. Now perform a code-review-focused checkpoint.
 
@@ -2794,6 +2966,21 @@ Read:
 Fix review-phase issues only. Do not add unrelated features.
 Before stopping, write an honest summary to ${workerPath(summaryPath(input.loopDir, input.round))}.
 `
+  const template = input.harness?.templates.review_phase
+  if (template) {
+    return renderPactHarnessTemplate(template, {
+      loopDir: input.loopDir,
+      round: input.round,
+      roundName: roundName(input.round),
+      feedbackPath: workerPath(input.feedbackPath),
+      goalTrackerPath: workerPath(input.goalTrackerPath),
+      planPath: workerPath(join(input.loopDir, "plan.md")),
+      summaryPath: workerPath(summaryPath(input.loopDir, input.round)),
+      goalTrackerSchema: input.harness?.goalTrackerSchema,
+      defaultPrompt,
+    })
+  }
+  return defaultPrompt
 }
 
 export function buildFinalizePrompt(input: {
@@ -2801,9 +2988,10 @@ export function buildFinalizePrompt(input: {
   round: number
   goalTrackerPath: string
   workerPath?: (path: string) => string
+  harness?: PactHarness
 }): string {
   const workerPath = input.workerPath ?? ((path: string) => path)
-  return `# PACT Finalize Phase
+  const defaultPrompt = `# PACT Finalize Phase
 
 Review and finalize the PACT loop.
 
@@ -2816,6 +3004,20 @@ Only do final verification, cleanup, and functionality-preserving simplification
 Do not use Task/subagent delegation; do the work in this session so PACT can observe and replay the round.
 Before stopping, write the final summary to ${workerPath(join(input.loopDir, "finalize-summary.md"))}.
 `
+  const template = input.harness?.templates.finalize
+  if (template) {
+    return renderPactHarnessTemplate(template, {
+      loopDir: input.loopDir,
+      round: input.round,
+      roundName: roundName(input.round),
+      goalTrackerPath: workerPath(input.goalTrackerPath),
+      planPath: workerPath(join(input.loopDir, "plan.md")),
+      finalizeSummaryPath: workerPath(join(input.loopDir, "finalize-summary.md")),
+      goalTrackerSchema: input.harness?.goalTrackerSchema,
+      defaultPrompt,
+    })
+  }
+  return defaultPrompt
 }
 
 export function summaryPath(loopDir: string, round: number): string {
@@ -2896,6 +3098,17 @@ function sanitizePatchArtifactNames(text: string): string {
 function isWorkerOwnedPatchTask(text: string): boolean {
   if (!/\b(?:solution|test)\.patch\b/i.test(text)) return false
   return /\b(?:generate|create|write|edit|stage|inspect|export|produce)\b/i.test(text)
+}
+
+function isPactHarnessTemplateName(name: string): name is PactHarnessTemplateName {
+  return (
+    name === "planner" ||
+    name === "initial_worker" ||
+    name === "continuation_worker" ||
+    name === "review" ||
+    name === "review_phase" ||
+    name === "finalize"
+  )
 }
 
 export function goalTrackerImmutableSha256(text: string): string {

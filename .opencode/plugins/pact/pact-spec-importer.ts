@@ -895,6 +895,8 @@ function inferTargetSurfaces(data: BundleData): TargetSurface[] {
     }
   }
 
+  addCoupledSurfaceInferences(drafts, data)
+
   return [...drafts.values()]
     .map((draft) => {
       const hard = draft.hard && draft.priority === "High" && hardEligibleSurfacePath(draft.path)
@@ -913,6 +915,81 @@ function inferTargetSurfaces(data: BundleData): TargetSurface[] {
     })
     .sort((left, right) => priorityRank(left.priority) - priorityRank(right.priority) || left.path.localeCompare(right.path))
     .map((surface, index) => ({ ...surface, id: `TS-${String(index + 1).padStart(3, "0")}` }))
+}
+
+function addCoupledSurfaceInferences(drafts: Map<string, TargetSurfaceDraft>, data: BundleData): void {
+  const text = allSpecText(data)
+  const lower = text.toLowerCase()
+  const sourceFile = "deterministic-coupled-surface-inference"
+
+  if (/\btomllib\b/.test(lower)) {
+    const reason = lower.includes("tomli")
+      ? "tomli-derived parser parity and stdlib module completeness"
+      : "tomllib stdlib module completeness"
+    for (const path of ["Lib/tomllib", "Lib/tomllib/__init__.py", "Lib/tomllib/_parser.py"]) {
+      addHardCoupledSurface(drafts, path, sourceFile, reason)
+    }
+    if (lower.includes("tomli")) {
+      for (const path of ["Lib/tomllib/_re.py", "Lib/tomllib/_types.py"]) {
+        addHardCoupledSurface(drafts, path, sourceFile, "tomli-derived parser parity helper surface")
+      }
+    }
+    addHardCoupledSurface(drafts, "Python/stdlib_module_names.h", sourceFile, "stdlib module registration for tomllib")
+  }
+
+  if (/\bzoneinfo\b/.test(lower)) {
+    for (const path of [
+      "Lib/zoneinfo",
+      "Lib/zoneinfo/__init__.py",
+      "Lib/zoneinfo/_common.py",
+      "Lib/zoneinfo/_tzpath.py",
+      "Lib/zoneinfo/_zoneinfo.py",
+    ]) {
+      addHardCoupledSurface(drafts, path, sourceFile, "zoneinfo package layout and public API completeness")
+    }
+    if (lower.includes("_zoneinfo.py") || lower.includes("zoneinfo.c") || lower.includes("c accelerator")) {
+      addHardCoupledSurface(drafts, "Modules/_zoneinfo.c", sourceFile, "zoneinfo C accelerator/build surface")
+      addHardCoupledSurface(drafts, "Modules/Setup", sourceFile, "zoneinfo C accelerator/build surface")
+      addHardCoupledSurface(drafts, "setup.py", sourceFile, "zoneinfo C accelerator/build surface")
+    }
+    if (lower.includes("compile time") || lower.includes("pythontzpath") || lower.includes("tzpath")) {
+      for (const path of ["Makefile.pre.in", "configure", "configure.ac", "Lib/sysconfig.py"]) {
+        addHardCoupledSurface(drafts, path, sourceFile, "zoneinfo TZPATH build/config integration")
+      }
+    }
+  }
+
+  if (lower.includes("typevartuple") || lower.includes("variadic generic") || lower.includes("pep 646")) {
+    for (const path of [
+      "Grammar/python.gram",
+      "Parser/parser.c",
+      "Python/compile.c",
+      "Lib/typing.py",
+      "Lib/ast.py",
+      "Python/ast_unparse.c",
+    ]) {
+      addHardCoupledSurface(drafts, path, sourceFile, "PEP 646 parser, compiler, typing, and unparse coupling")
+    }
+  }
+
+  for (const moduleName of inferNewStdlibModules(text)) {
+    addHardCoupledSurface(drafts, `Lib/${moduleName}`, sourceFile, `new stdlib module surface for ${moduleName}`)
+  }
+}
+
+function addHardCoupledSurface(
+  drafts: Map<string, TargetSurfaceDraft>,
+  path: string,
+  sourceFile: string,
+  reason: string,
+): void {
+  addTargetSurfaceDraft(drafts, path, {
+    priority: "High",
+    category: categoryForSurfacePath(path),
+    hard: hardEligibleSurfacePath(path),
+    sourceFile,
+    reason,
+  })
 }
 
 function addTargetSurfaceDraft(
@@ -1063,6 +1140,24 @@ function strongerCategory(left: TargetSurfaceCategory, right: TargetSurfaceCateg
   if (left === "integration" || right === "integration") return "integration"
   if (left === "generated" || right === "generated") return "generated"
   return left
+}
+
+function allSpecText(data: BundleData): string {
+  return [data.originalRequirement, ...data.sections.map((section) => section.content)].join("\n")
+}
+
+function inferNewStdlibModules(text: string): string[] {
+  const modules = new Set<string>()
+  for (const match of text.matchAll(/new standard[- ]library module (?:named|called)\s*`?([a-z][a-z0-9_]*)`?/gi)) {
+    modules.add(match[1] ?? "")
+  }
+  for (const match of text.matchAll(/add(?:ing)?\s+`([a-z][a-z0-9_]*)`\s+(?:as\s+)?(?:a\s+)?(?:separate\s+)?(?:top-level\s+)?(?:standard[- ]library\s+)?module/gi)) {
+    modules.add(match[1] ?? "")
+  }
+  for (const match of text.matchAll(/add(?:ing)?\s+(?:a\s+)?(?:new\s+)?(?:standard[- ]library\s+)?module\s+(?:named|called)\s+`?([a-z][a-z0-9_]*)`?/gi)) {
+    modules.add(match[1] ?? "")
+  }
+  return [...modules].filter((moduleName) => moduleName && !["module", "support"].includes(moduleName))
 }
 
 function specInputManifest(data: BundleData, outputLoopDir: string): Record<string, unknown> {

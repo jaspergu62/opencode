@@ -1,0 +1,29 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "pact-current",
+  "optimization_surface": "workflow/schema",
+  "candidate_scope": [
+    "manifest.json",
+    "templates/*.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json"
+  ],
+  "protected_scope": [
+    ".opencode/plugins/pact*.ts",
+    ".opencode/plugins/pact/*.ts",
+    "runner code",
+    "benchmark source"
+  ],
+  "default_mini_suite_source": "/Users/gujiazhen/Documents/cc_codes/outputs/lolbench_pact_round0_imports_v14_opencode_best/round0-imports.tsv",
+  "promotion_policy": "guarded",
+  "evaluation_dimensions": [
+    "pass",
+    "resolved",
+    "stop_reason",
+    "round_count",
+    "verification_status",
+    "final_hidden_gate",
+    "timeout",
+    "patch_quality"
+  ]
+}
