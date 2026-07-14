@@ -212,6 +212,17 @@ describe("PACT run driver", () => {
     expect(parsed.agent).toBe("pact-worker")
   })
 
+  test("parses an explicit worker config source", () => {
+    const parsed = cliArgs([
+      "--plan-file",
+      "/tmp/PROMPT.md",
+      "--worker-config-source",
+      "harbor-openrouter",
+    ])
+
+    expect(parsed.workerConfigSource).toBe("harbor-openrouter")
+  })
+
   test("defaults worker runner from PACT env", () => {
     const oldRunner = process.env.PACT_WORKER_RUNNER
     const oldImage = process.env.LOLBENCH_AGENT_IMAGE_TAG

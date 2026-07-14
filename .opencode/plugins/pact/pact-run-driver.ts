@@ -129,6 +129,7 @@ export function buildPactStartPrompt(input: {
   reviewerAgent?: string
   reviewerModel?: string
   workerAgent?: string
+  workerConfigSource?: string
   workerModel: string
   fullAlignmentInterval?: number
   sessionStrategy?: SessionStrategy
@@ -152,7 +153,7 @@ export function buildPactStartPrompt(input: {
 - worker_backend=opencode-cli
 - worker_agent=${input.workerAgent ?? "pact-worker"}
 - worker_model=${input.workerModel}
-- worker_config_source=mini-swe-agent-env
+- worker_config_source=${input.workerConfigSource ?? "mini-swe-agent-env"}
 - session_strategy=${input.sessionStrategy ?? "new-per-round"}
 - round_boundary=${input.roundBoundary ?? "run_exit"}
 - trajectory_mode=full-redact
@@ -175,6 +176,7 @@ export function runPactDriver(input: {
   plannerAgent?: string
   reviewerAgent?: string
   workerAgent?: string
+  workerConfigSource?: string
   variant?: string
   workerRunner?: WorkerRunner
   workerContainerImage?: string
@@ -231,7 +233,7 @@ export function runPactDriver(input: {
     plannerAgent: input.plannerAgent ?? "pact-planner",
     reviewerAgent: input.reviewerAgent ?? "pact-reviewer",
     workerModel: input.model,
-    workerConfigSource: "mini-swe-agent-env",
+    workerConfigSource: input.workerConfigSource ?? "mini-swe-agent-env",
     fullAlignmentInterval: input.fullAlignmentInterval,
     sessionStrategy: input.sessionStrategy,
     verificationCommand: input.verificationCommand,
@@ -2496,6 +2498,7 @@ export function cliArgs(raw: string[]): {
   plannerAgent?: string
   reviewerAgent?: string
   workerAgent?: string
+  workerConfigSource?: string
   variant?: string
   workerRunner?: WorkerRunner
   workerContainerImage?: string
@@ -2538,6 +2541,7 @@ export function cliArgs(raw: string[]): {
     plannerAgent: parsed["planner-agent"],
     reviewerAgent: parsed["reviewer-agent"],
     workerAgent: parsed["worker-agent"] ?? parsed.agent,
+    workerConfigSource: parsed["worker-config-source"],
     variant: parsed.variant,
     workerRunner: (parsed["worker-runner"] ?? env.PACT_WORKER_RUNNER) === "docker" ? "docker" : "host",
     workerContainerImage: parsed["worker-container-image"] ?? env.LOLBENCH_AGENT_IMAGE_TAG,

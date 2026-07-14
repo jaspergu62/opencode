@@ -48,6 +48,7 @@ export function runPactHarborCase(input: PactHarborRunOptions) {
     maxRounds: input.maxRounds,
     workerRunner: "host",
     workerAgent: input.workerAgent,
+    workerConfigSource: "harbor-openrouter",
     reviewerAgent: input.reviewerAgent,
     plannerBackend: "spec-import",
     reviewerBackend: "opencode-cli",
