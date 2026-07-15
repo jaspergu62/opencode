@@ -51,6 +51,8 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
             command_call = environment.exec.await_args_list[4]
             command = command_call.kwargs["command"]
             self.assertIn("pact-harbor-run.ts", command)
+            self.assertIn("export PATH=/opt/pact-runtime/bin:$PATH", command)
+            self.assertIn("/opt/pact-runtime/bin/bun", command)
             self.assertIn("openrouter/z-ai/glm-5.2", command)
             self.assertIn("--worker-completion-grace-ms", command)
             self.assertIn("--reviewer-completion-grace-ms", command)

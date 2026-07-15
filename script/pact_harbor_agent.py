@@ -109,7 +109,7 @@ class PactOpenCodeAgent(BaseAgent):
         command = " ".join(
             shlex.quote(part)
             for part in [
-                "bun",
+                "/opt/pact-runtime/bin/bun",
                 "/opt/pact/plugins/pact-harbor-run.ts",
                 "--project-root",
                 project_root,
@@ -135,8 +135,9 @@ class PactOpenCodeAgent(BaseAgent):
                 loop_id,
             ]
         )
+        pact_command = f"export PATH=/opt/pact-runtime/bin:$PATH; {command} 2>&1 | tee /logs/agent/pact-driver.log"
         result = await environment.exec(
-            command=f"bash -o pipefail -c {shlex.quote(f'{command} 2>&1 | tee /logs/agent/pact-driver.log')}",
+            command=f"bash -o pipefail -c {shlex.quote(pact_command)}",
             cwd=project_root,
             env={
                 "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",

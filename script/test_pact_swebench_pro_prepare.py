@@ -22,8 +22,10 @@ class PrepareSWEbenchProTest(unittest.TestCase):
         self.assertEqual(official_base_image(prepared), "jefzda/sweap-images:owner.repo-case")
         self.assertEqual(prepared.count("AS pact-runtime"), 1)
         self.assertIn("FROM --platform=linux/amd64 jefzda/sweap-images:owner.repo-case", prepared)
-        self.assertIn("/opt/pact-runtime/bin:${PATH}", prepared)
-        self.assertIn("/usr/local/bin/opencode", prepared)
+        self.assertIn('RUN PATH="/opt/pact-runtime/bin:${PATH}"', prepared)
+        self.assertIn("/opt/pact-runtime/bin/opencode --version", prepared)
+        self.assertNotIn("ENV PATH=", prepared)
+        self.assertNotIn("/usr/local/bin/node", prepared)
         self.assertEqual(inject_pact_runtime(prepared, runtime).count("AS pact-runtime"), 1)
 
     def test_configures_phase_network_boundaries_without_agent_timeout(self):

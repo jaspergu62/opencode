@@ -48,12 +48,10 @@ def inject_pact_runtime(dockerfile: str, runtime_image: str) -> str:
         f"{cleaned.rstrip()}\n\n"
         f"{marker}\n"
         "COPY --from=pact-runtime /opt/pact-runtime /opt/pact-runtime\n"
-        'ENV PATH="/opt/pact-runtime/bin:${PATH}"\n'
-        "RUN ln -sf /opt/pact-runtime/bin/node /usr/local/bin/node \\\n"
-        "    && ln -sf /opt/pact-runtime/bin/bun /usr/local/bin/bun \\\n"
-        "    && ln -sf /opt/pact-runtime/bin/opencode /usr/local/bin/opencode \\\n"
-        "    && ln -sf /opt/pact-runtime/bin/rg /usr/local/bin/rg \\\n"
-        "    && bun --version && opencode --version && rg --version\n"
+        'RUN PATH="/opt/pact-runtime/bin:${PATH}" \\\n'
+        "    /opt/pact-runtime/bin/bun --version \\\n"
+        "    && /opt/pact-runtime/bin/opencode --version \\\n"
+        "    && /opt/pact-runtime/bin/rg --version\n"
     )
 
 
