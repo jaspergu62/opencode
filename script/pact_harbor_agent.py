@@ -96,6 +96,8 @@ class PactOpenCodeAgent(BaseAgent):
 
         model = self.model_name or "openrouter/z-ai/glm-5.2"
         config = {
+            "model": model,
+            "small_model": model,
             "provider": {
                 "openrouter": {
                     "npm": "@openrouter/ai-sdk-provider",

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,9 +60,11 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("120000", command)
             self.assertNotIn("/tests", command)
             self.assertNotIn("/solution", command)
-            config = command_call.kwargs["env"]["OPENCODE_CONFIG_CONTENT"]
-            self.assertIn('"webfetch":"deny"', config)
-            self.assertIn('"websearch":"deny"', config)
+            config = json.loads(command_call.kwargs["env"]["OPENCODE_CONFIG_CONTENT"])
+            self.assertEqual(config["model"], "openrouter/z-ai/glm-5.2")
+            self.assertEqual(config["small_model"], "openrouter/z-ai/glm-5.2")
+            self.assertEqual(config["permission"]["webfetch"], "deny")
+            self.assertEqual(config["permission"]["websearch"], "deny")
 
 
 if __name__ == "__main__":
