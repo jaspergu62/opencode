@@ -63,6 +63,7 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
             config = json.loads(command_call.kwargs["env"]["OPENCODE_CONFIG_CONTENT"])
             self.assertEqual(config["model"], "openrouter/z-ai/glm-5.2")
             self.assertEqual(config["small_model"], "openrouter/z-ai/glm-5.2")
+            self.assertFalse(config["snapshot"])
             self.assertEqual(config["permission"]["webfetch"], "deny")
             self.assertEqual(config["permission"]["websearch"], "deny")
 

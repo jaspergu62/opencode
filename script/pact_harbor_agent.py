@@ -98,6 +98,7 @@ class PactOpenCodeAgent(BaseAgent):
         config = {
             "model": model,
             "small_model": model,
+            "snapshot": False,
             "provider": {
                 "openrouter": {
                     "npm": "@openrouter/ai-sdk-provider",
