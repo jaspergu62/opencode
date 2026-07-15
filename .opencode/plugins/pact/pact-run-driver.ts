@@ -2342,7 +2342,7 @@ function buildOpencodeRunArgs(input: {
   variant?: string
   sessionID?: string
 }): string[] {
-  const args = ["run", "--dangerously-skip-permissions", "-m", input.model]
+  const args = ["run", "--dangerously-skip-permissions", "--title", "PACT checkpoint", "-m", input.model]
   if (input.agent) args.push("--agent", input.agent)
   if (input.variant) args.push("--variant", input.variant)
   if (input.sessionID) args.push("-s", input.sessionID)

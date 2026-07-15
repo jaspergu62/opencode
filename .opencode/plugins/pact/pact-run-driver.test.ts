@@ -118,7 +118,15 @@ function opencodePromptArg(args: string[]): string {
 }
 
 function opencodeBaseArgs(args: string[]): string[] {
-  return args.slice(0, -1)
+  const base = args.slice(0, -1)
+  const titleIndex = base.indexOf("--title")
+  if (titleIndex >= 0) base.splice(titleIndex, 2)
+  return base
+}
+
+function opencodeTitleArg(args: string[]): string | undefined {
+  const titleIndex = args.indexOf("--title")
+  return titleIndex >= 0 ? args[titleIndex + 1] : undefined
 }
 
 describe("PACT run driver", () => {
@@ -733,8 +741,9 @@ Continue source changes.
       const configArg = calls[0]?.args.find((arg) => arg.startsWith("OPENCODE_CONFIG_CONTENT=")) ?? ""
       expect(configArg).toContain("/opt/opencode-pact-plugins/pact.ts")
       expect(configArg).not.toContain(pluginDir)
-      const imageIndex = calls[0]!.args.indexOf("lolbench/cpython-agent:1")
-      expect(opencodeBaseArgs(calls[0]?.args ?? []).slice(imageIndex + 1)).toEqual([
+      const baseArgs = opencodeBaseArgs(calls[0]?.args ?? [])
+      const imageIndex = baseArgs.indexOf("lolbench/cpython-agent:1")
+      expect(baseArgs.slice(imageIndex + 1)).toEqual([
         "opencode",
         "run",
         "--dangerously-skip-permissions",
@@ -1044,6 +1053,7 @@ Continue after factual artifact inspection.
 
     expect(result.status).toBe("stopped")
     expect(calls).toHaveLength(2)
+    expect(calls.map((call) => opencodeTitleArg(call.args))).toEqual(["PACT checkpoint", "PACT checkpoint"])
     expect(opencodeBaseArgs(calls[0]?.args ?? [])).toEqual([
       "run",
       "--dangerously-skip-permissions",
