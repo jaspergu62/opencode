@@ -57,6 +57,7 @@ import {
 } from "./pact-core"
 
 const OPENCODE_RUN_MAX_BUFFER = 100 * 1024 * 1024
+let opencodeDatabaseCounter = 0
 
 type SpawnResult = {
   status: number | null
@@ -265,12 +266,17 @@ export function runPactDriver(input: {
   )
   let sessionID: string | undefined
   let sessionStrategy: SessionStrategy = input.sessionStrategy ?? initialized.state.session_strategy ?? "new-per-round"
+  let sharedWorkerDatabase: string | undefined
   let promptRound = initialized.state.next_round ?? initialized.state.current_round
 
   while (invocations < maxInvocations) {
     const invokedRound = promptRound
     const invocationState = readState(loopDir)
     markWorkerRoundAttempted(loopDir, invokedRound)
+    const invocationDatabase =
+      sessionStrategy === "same-session"
+        ? (sharedWorkerDatabase ??= isolatedOpenCodeDatabase())
+        : isolatedOpenCodeDatabase()
     const opencodeArgs = buildOpencodeRunArgs({
       model: input.model,
       agent: input.workerAgent ?? input.agent,
@@ -302,6 +308,7 @@ export function runPactDriver(input: {
           : join(loopDir, `round-${roundName(invokedRound)}-summary.md`)
         : undefined,
       completionGraceMs: input.workerCompletionGraceMs,
+      database: invocationDatabase,
     })
     invocations++
     if (result.error || result.status !== 0) {
@@ -346,7 +353,11 @@ export function runPactDriver(input: {
       return { status: state.status, invocations, loopDir, round: state.next_round ?? state.current_round, exitCode: 0 }
     }
 
-    sessionStrategy = input.sessionStrategy ?? state.session_strategy ?? "new-per-round"
+    const nextSessionStrategy = input.sessionStrategy ?? state.session_strategy ?? "new-per-round"
+    if (nextSessionStrategy === "same-session" && sessionStrategy !== "same-session") {
+      sharedWorkerDatabase = invocationDatabase
+    }
+    sessionStrategy = nextSessionStrategy
     sessionID = state.active_round_session_id ?? state.active_session_id
     const promptPath = join(loopDir, `round-${roundName(state.next_round ?? state.current_round)}-prompt.md`)
     if (!existsSync(promptPath) || (sessionStrategy === "same-session" && !sessionID)) {
@@ -2243,6 +2254,8 @@ function buildWorkerInvocation(input: {
     `WORKSPACE=${input.containerWorkspace}`,
     "-e",
     `PACT_PROJECT_ROOT=${input.containerWorkspace}`,
+    "-e",
+    "OPENCODE_DB",
     "-v",
     `${input.projectRoot}:${input.containerWorkspace}`,
     "-w",
@@ -2358,7 +2371,12 @@ function spawnOpenCodeRun(input: {
   shellTrampoline?: boolean
   completionArtifact?: string
   completionGraceMs?: number
+  database?: string
 }): SpawnResult {
+  const childEnv = {
+    ...env,
+    OPENCODE_DB: input.database ?? isolatedOpenCodeDatabase(),
+  }
   const targetCommand = input.shellTrampoline ? "/bin/sh" : input.command
   const targetArgs = input.shellTrampoline
     ? ["-c", 'exec "$@"', "opencode-run", input.command, ...input.args, input.prompt]
@@ -2378,7 +2396,7 @@ function spawnOpenCodeRun(input: {
       stdio: ["pipe", "pipe", "pipe"],
       maxBuffer: OPENCODE_RUN_MAX_BUFFER,
       timeout: configuredOpenCodeRunTimeoutMs(),
-      env: process.env,
+      env: childEnv,
     })
   }
   return input.spawn(targetCommand, targetArgs, {
@@ -2388,8 +2406,13 @@ function spawnOpenCodeRun(input: {
     stdio: ["pipe", "pipe", "pipe"],
     maxBuffer: OPENCODE_RUN_MAX_BUFFER,
     timeout: configuredOpenCodeRunTimeoutMs(),
-    env: process.env,
+    env: childEnv,
   })
+}
+
+function isolatedOpenCodeDatabase(): string {
+  opencodeDatabaseCounter += 1
+  return `pact-${process.pid}-${Date.now()}-${opencodeDatabaseCounter}.db`
 }
 
 const OPENCODE_ARTIFACT_COMPLETION_GUARD = String.raw`

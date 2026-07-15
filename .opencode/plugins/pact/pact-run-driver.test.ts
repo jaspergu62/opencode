@@ -738,6 +738,7 @@ Continue source changes.
       expect(calls[0]?.args).toContain("OPENROUTER_API_KEY")
       expect(calls[0]?.args).toContain("OPENROUTER_BASE_URL")
       expect(calls[0]?.args).toContain("OPENCODE_CONFIG")
+      expect(calls[0]?.args).toContain("OPENCODE_DB")
       const configArg = calls[0]?.args.find((arg) => arg.startsWith("OPENCODE_CONFIG_CONTENT=")) ?? ""
       expect(configArg).toContain("/opt/opencode-pact-plugins/pact.ts")
       expect(configArg).not.toContain(pluginDir)
@@ -1017,7 +1018,13 @@ AC-1: PARTIAL.
 
   test("opencode-cli reviewer runs through OpenCode with a positional prompt", () => {
     const project = tempGitProject()
-    const calls: Array<{ command: string; args: string[]; prompt: string; stdin?: string }> = []
+    const calls: Array<{
+      command: string
+      args: string[]
+      prompt: string
+      stdin?: string
+      database?: string
+    }> = []
     let loopDir = ""
 
     const result = runPactDriver({
@@ -1035,7 +1042,13 @@ AC-1: PARTIAL.
       },
       spawnSync(command, args, options) {
         const prompt = opencodePromptArg(args)
-        calls.push({ command, args, prompt, stdin: options.input })
+        calls.push({
+          command,
+          args,
+          prompt,
+          stdin: options.input,
+          database: options.env?.OPENCODE_DB,
+        })
         if (prompt.startsWith("# PACT Review Round")) {
           return {
             status: 0,
@@ -1072,6 +1085,9 @@ Continue after factual artifact inspection.
     ])
     expect(calls[1]?.prompt).toContain("# PACT Review Round 01")
     expect(calls[1]?.stdin).toBe("")
+    expect(calls[0]?.database).toStartWith("pact-")
+    expect(calls[1]?.database).toStartWith("pact-")
+    expect(calls[1]?.database).not.toBe(calls[0]?.database)
     expect(readFileSync(join(loopDir, "round-01-review.md"), "utf-8")).toContain(
       "Continue after factual artifact inspection",
     )
@@ -1639,7 +1655,7 @@ exit 0
 
   test("can explicitly opt in to same-session continuation", () => {
     const project = tempGitProject()
-    const calls: Array<{ args: string[]; input: string; stdin?: string }> = []
+    const calls: Array<{ args: string[]; input: string; stdin?: string; database?: string }> = []
     let loopDir = ""
 
     const result = runPactDriver({
@@ -1655,7 +1671,12 @@ exit 0
         return validPlannerOutput()
       },
       spawnSync(_command, args, options) {
-        calls.push({ args, input: opencodePromptArg(args), stdin: options.input })
+        calls.push({
+          args,
+          input: opencodePromptArg(args),
+          stdin: options.input,
+          database: options.env?.OPENCODE_DB,
+        })
         if (calls.length === 1) {
           const state = readState(loopDir)
           state.current_round = 2
@@ -1685,6 +1706,8 @@ exit 0
     ])
     expect(calls[1]?.input).toBe("same session prompt\n")
     expect(calls[1]?.stdin).toBe("")
+    expect(calls[0]?.database).toStartWith("pact-")
+    expect(calls[1]?.database).toBe(calls[0]?.database)
   })
 
   test("does not reuse a stale loop when driver-owned planner fails", () => {
