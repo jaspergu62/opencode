@@ -1490,6 +1490,58 @@ esac
     expect(readFileSync(join(result.loopDir!, "round-01-review.md"), "utf-8")).toContain("PACT_COMPLETE")
   })
 
+  test("worker artifact completion guard watches the finalize summary during finalize", () => {
+    const project = tempGitProject()
+    const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-finalize-guard-bin-"))
+    tempDirs.push(binDir)
+    const fakeOpencode = join(binDir, "fake-opencode")
+    writeFileSync(
+      fakeOpencode,
+      `#!/bin/sh
+loop_dir=$(find "$PWD/.pact/loops" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+case "$*" in
+  *"PACT Finalize Phase"*)
+    printf '%s\n' '# Finalize Summary' 'Final verification completed.' > "$loop_dir/finalize-summary.md"
+    sleep 1
+    touch "$PWD/finalize-ran-past-artifact"
+    ;;
+  *"PACT Review Phase 02"*)
+    printf '%s\n' '# Review Phase Summary' 'Code review completed.' > "$loop_dir/round-02-summary.md"
+    ;;
+  *)
+    printf '%s\n' '# Worker Summary' 'Focused verification completed.' > "$loop_dir/round-01-summary.md"
+    printf '%s\n' 'worker change' >> "$PWD/src.txt"
+    ;;
+esac
+`,
+      "utf-8",
+    )
+    chmodSync(fakeOpencode, 0o755)
+
+    const result = runPactDriver({
+      projectRoot: project,
+      planFile: join(project, "plan.md"),
+      model: "openrouter/z-ai/glm-5.2",
+      maxRounds: 1,
+      opencodeCommand: fakeOpencode,
+      workerCompletionGraceMs: 100,
+      maxInvocations: 3,
+      planner() {
+        return validPlannerOutput()
+      },
+      reviewer() {
+        return "### Decision Summary\nComplete.\n\nPACT_COMPLETE\n"
+      },
+    })
+
+    expect(result.loopDir).toBeDefined()
+    expect(existsSync(join(result.loopDir!, "finalize-summary.md"))).toBe(true)
+    expect(existsSync(join(project, "finalize-ran-past-artifact"))).toBe(false)
+    expect(readFileSync(join(result.loopDir!, "round-03-trajectory.json"), "utf-8")).toContain(
+      "artifact completion guard",
+    )
+  })
+
   test("default OpenCode runner times out hung commands", () => {
     const project = tempGitProject()
     const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-timeout-bin-"))

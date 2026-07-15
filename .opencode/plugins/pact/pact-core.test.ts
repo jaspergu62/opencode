@@ -2034,6 +2034,45 @@ PACT_COMPLETE
       parse_status: "behavior_obligation_failed",
     })
   })
+
+  test("accepts explicit behavioral proofs after describing their initial unverified state", () => {
+    const project = tempProject()
+    const loop = createLoop({ projectRoot: project, planFile: "plan.md", maxRounds: 3 })
+    writeJsonFile(join(loop.loopDir, "coverage-obligation.json"), {
+      schema: "pact-coverage-obligation/v1",
+      obligations: [
+        { id: "BO-001", title: "First behavior", status: "UNVERIFIED" },
+        { id: "BO-017", title: "Last behavior", status: "UNVERIFIED" },
+      ],
+    })
+
+    const decision = recordReviewDecision({
+      loopDir: loop.loopDir,
+      round: 1,
+      reviewText: `### Behavioral Contract Audit
+The imported ledger lists BO-001…BO-017 as initially UNVERIFIED.
+
+| BO | Status | Evidence |
+| --- | --- | --- |
+| BO-001 | PROVEN_CHANGED | Probe evidence confirms the first behavior. |
+| BO-017 | PROVEN_CHANGED | Source and test evidence confirm the last behavior. |
+
+### Base-Equivalence Proof Audit
+No base-equivalence claims.
+
+### Complete Decision Evidence
+Every behavioral obligation is proven by the evidence table above.
+
+PACT_COMPLETE
+`,
+    })
+
+    expect(decision).toMatchObject({
+      marker: "complete",
+      parseStatus: "complete_signal",
+      terminalLine: "PACT_COMPLETE",
+    })
+  })
 })
 
 describe("failure classification and round results", () => {

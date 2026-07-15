@@ -2172,20 +2172,22 @@ function reviewProvesBehavioralObligation(reviewText: string, obligationID: stri
     .map((line) => line.trim())
     .filter((line) => line.includes(obligationID))
   if (!evidenceLines.length) return false
+  let proven = false
   for (const line of evidenceLines) {
-    if (/\b(?:UNVERIFIED|MISSING)\b/.test(line)) return false
+    if (/\b(?:UNVERIFIED|MISSING)\b/.test(line)) continue
     if (/\b(?:PROVEN_CHANGED|NOT_APPLICABLE_WITH_EVIDENCE)\b/.test(line) && line.length >= obligationID.length + 24) {
-      return true
+      proven = true
+      continue
     }
     if (
       /\bPROVEN_BASE_EQUIVALENT\b/.test(line) &&
       /\b(?:evidence|proof|source|inspected|generated|probe|because|already)\b/i.test(line) &&
       line.length >= obligationID.length + 36
     ) {
-      return true
+      proven = true
     }
   }
-  return false
+  return proven
 }
 
 export function recordReviewDecision(input: {

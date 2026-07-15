@@ -269,6 +269,7 @@ export function runPactDriver(input: {
 
   while (invocations < maxInvocations) {
     const invokedRound = promptRound
+    const invocationState = readState(loopDir)
     markWorkerRoundAttempted(loopDir, invokedRound)
     const opencodeArgs = buildOpencodeRunArgs({
       model: input.model,
@@ -296,7 +297,9 @@ export function runPactDriver(input: {
       prompt: nextPrompt,
       shellTrampoline: openCodeShellTrampoline,
       completionArtifact: input.workerCompletionGraceMs
-        ? join(loopDir, `round-${roundName(invokedRound)}-summary.md`)
+        ? invocationState.phase === "finalize"
+          ? join(loopDir, "finalize-summary.md")
+          : join(loopDir, `round-${roundName(invokedRound)}-summary.md`)
         : undefined,
       completionGraceMs: input.workerCompletionGraceMs,
     })
