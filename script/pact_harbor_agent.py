@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import shlex
 from pathlib import Path
 
@@ -58,7 +59,7 @@ class PactOpenCodeAgent(BaseAgent):
         return "pact-opencode"
 
     def version(self) -> str:
-        return "swebench-pro-v1"
+        return "swebench-pro-v2"
 
     async def setup(self, environment: BaseEnvironment) -> None:
         if not self.runtime_dir.is_dir():
@@ -94,6 +95,17 @@ class PactOpenCodeAgent(BaseAgent):
             cwd=project_root,
         )
 
+        loop_id = str(self.context_id or self.session_id or "harbor-trial").replace("/", "-")
+        git_archive = f"/opt/pact/original-git-{loop_id}.tar.enc"
+        git_archive_key = secrets.token_urlsafe(48)
+        isolate_git = await environment.exec(
+            command=self._isolate_git_command(git_archive),
+            cwd=project_root,
+            env={"PACT_GIT_ARCHIVE_KEY": git_archive_key},
+        )
+        if isolate_git.return_code != 0:
+            raise RuntimeError("Failed to isolate task git history before the PACT agent phase")
+
         model = self.model_name or "openrouter/z-ai/glm-5.2"
         config = {
             "model": model,
@@ -108,7 +120,6 @@ class PactOpenCodeAgent(BaseAgent):
             "permission": {"webfetch": "deny", "websearch": "deny"},
             "mcp": {},
         }
-        loop_id = str(self.context_id or self.session_id or "harbor-trial").replace("/", "-")
         command = " ".join(
             shlex.quote(part)
             for part in [
@@ -139,23 +150,35 @@ class PactOpenCodeAgent(BaseAgent):
             ]
         )
         pact_command = f"export PATH=/opt/pact-runtime/bin:$PATH; {command} 2>&1 | tee /logs/agent/pact-driver.log"
-        result = await environment.exec(
-            command=f"bash -o pipefail -c {shlex.quote(pact_command)}",
-            cwd=project_root,
-            env={
-                "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
-                "OPENCODE_CONFIG_CONTENT": json.dumps(config, separators=(",", ":")),
-            },
-            timeout_sec=None,
-        )
-        await environment.exec(
-            command=(
-                "mkdir -p /logs/agent/pact && "
-                "cp -R .pact/loops /logs/agent/pact/ 2>/dev/null || true; "
-                "git diff --binary --no-ext-diff > /logs/agent/final.patch"
-            ),
-            cwd=project_root,
-        )
+        result = None
+        try:
+            result = await environment.exec(
+                command=f"bash -o pipefail -c {shlex.quote(pact_command)}",
+                cwd=project_root,
+                env={
+                    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+                    "OPENCODE_CONFIG_CONTENT": json.dumps(config, separators=(",", ":")),
+                },
+                timeout_sec=None,
+            )
+            await environment.exec(
+                command=(
+                    "mkdir -p /logs/agent/pact && "
+                    "cp -R .pact/loops /logs/agent/pact/ 2>/dev/null || true; "
+                    "git diff --binary --no-ext-diff > /logs/agent/final.patch"
+                ),
+                cwd=project_root,
+            )
+        finally:
+            restore_git = await environment.exec(
+                command=self._restore_git_command(git_archive),
+                cwd=project_root,
+                env={"PACT_GIT_ARCHIVE_KEY": git_archive_key},
+            )
+            if restore_git.return_code != 0:
+                raise RuntimeError("Failed to restore task git history for the Harbor verifier phase")
+
+        assert result is not None
         context.metadata = {
             "pact_driver_exit_code": result.return_code,
             "pact_model": model,
@@ -166,3 +189,39 @@ class PactOpenCodeAgent(BaseAgent):
         }
         if result.return_code != 0:
             raise RuntimeError(f"PACT driver exited with code {result.return_code}")
+
+    @staticmethod
+    def _isolate_git_command(git_archive: str) -> str:
+        archive = shlex.quote(git_archive)
+        return (
+            "set -euo pipefail; "
+            "test -d .git; "
+            "command -v openssl >/dev/null; "
+            f"rm -f {archive}; "
+            "tar -cf - .git | "
+            "openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt "
+            f"-pass env:PACT_GIT_ARCHIVE_KEY -out {archive}; "
+            "rm -rf .git; "
+            "git init -q; "
+            "git config user.email pact-harbor@localhost; "
+            "git config user.name 'PACT Harbor'; "
+            "git add -A; "
+            "git commit -q --no-gpg-sign -m 'PACT isolated baseline'; "
+            "test \"$(git rev-list --all --count)\" = 1"
+        )
+
+    @staticmethod
+    def _restore_git_command(git_archive: str) -> str:
+        archive = shlex.quote(git_archive)
+        return (
+            "set -euo pipefail; "
+            f"test -s {archive}; "
+            "rm -rf .git; "
+            "openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 "
+            f"-pass env:PACT_GIT_ARCHIVE_KEY -in {archive} | tar -xf -; "
+            f"rm -f {archive}; "
+            "test -d .git; "
+            "exclude=$(git rev-parse --git-path info/exclude); "
+            "mkdir -p \"$(dirname \"$exclude\")\"; "
+            "grep -qxF '.pact/' \"$exclude\" 2>/dev/null || printf '%s\\n' '.pact/' >> \"$exclude\""
+        )

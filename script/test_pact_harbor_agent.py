@@ -26,7 +26,9 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
                         SimpleNamespace(return_code=0, stdout="/app\n", stderr=""),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
+                        SimpleNamespace(return_code=0, stdout="", stderr=""),
                         SimpleNamespace(return_code=0, stdout="ok", stderr=""),
+                        SimpleNamespace(return_code=0, stdout="", stderr=""),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
                     ]
                 ),
@@ -49,7 +51,16 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
             uploaded_targets = [call.kwargs["target_dir"] for call in environment.upload_dir.await_args_list]
             self.assertEqual(uploaded_targets, ["/opt/pact/plugins", "/opt/pact/harness"])
             environment.upload_file.assert_awaited_once()
-            command_call = environment.exec.await_args_list[4]
+            isolate_call = environment.exec.await_args_list[4]
+            isolate_command = isolate_call.kwargs["command"]
+            self.assertIn("openssl enc -aes-256-cbc", isolate_command)
+            self.assertIn("rm -rf .git", isolate_command)
+            self.assertIn("git init -q", isolate_command)
+            self.assertIn("git rev-list --all --count", isolate_command)
+            archive_key = isolate_call.kwargs["env"]["PACT_GIT_ARCHIVE_KEY"]
+            self.assertNotIn(archive_key, isolate_command)
+
+            command_call = environment.exec.await_args_list[5]
             command = command_call.kwargs["command"]
             self.assertIn("pact-harbor-run.ts", command)
             self.assertIn("export PATH=/opt/pact-runtime/bin:$PATH", command)
@@ -66,6 +77,51 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(config["snapshot"])
             self.assertEqual(config["permission"]["webfetch"], "deny")
             self.assertEqual(config["permission"]["websearch"], "deny")
+            self.assertNotIn("PACT_GIT_ARCHIVE_KEY", command_call.kwargs["env"])
+
+            restore_call = environment.exec.await_args_list[7]
+            restore_command = restore_call.kwargs["command"]
+            self.assertIn("openssl enc -d -aes-256-cbc", restore_command)
+            self.assertIn("test -d .git", restore_command)
+            self.assertIn(".pact/", restore_command)
+            self.assertEqual(restore_call.kwargs["env"]["PACT_GIT_ARCHIVE_KEY"], archive_key)
+
+    async def test_restores_original_git_history_when_pact_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = root / "runtime"
+            harness = root / "harness"
+            runtime.mkdir()
+            harness.mkdir()
+            environment = SimpleNamespace(
+                exec=AsyncMock(
+                    side_effect=[
+                        SimpleNamespace(return_code=0, stdout="/app\n", stderr=""),
+                        SimpleNamespace(return_code=0, stdout="", stderr=""),
+                        SimpleNamespace(return_code=0, stdout="", stderr=""),
+                        SimpleNamespace(return_code=1, stdout="", stderr="failed"),
+                        SimpleNamespace(return_code=0, stdout="", stderr=""),
+                        SimpleNamespace(return_code=0, stdout="", stderr=""),
+                    ]
+                ),
+                upload_file=AsyncMock(),
+            )
+            agent = PactOpenCodeAgent(
+                logs_dir=root / "logs",
+                model_name="openrouter/z-ai/glm-5.2",
+                runtime_dir=str(runtime),
+                harness_dir=str(harness),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "PACT driver exited with code 1"):
+                await agent.run("Fix the requested behavior.", environment, AgentContext())
+
+            restore_call = environment.exec.await_args_list[-1]
+            self.assertIn("openssl enc -d -aes-256-cbc", restore_call.kwargs["command"])
+            self.assertEqual(
+                restore_call.kwargs["env"]["PACT_GIT_ARCHIVE_KEY"],
+                environment.exec.await_args_list[2].kwargs["env"]["PACT_GIT_ARCHIVE_KEY"],
+            )
 
 
 if __name__ == "__main__":
