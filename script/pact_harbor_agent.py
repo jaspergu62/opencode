@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import secrets
 import shlex
+import tempfile
 from pathlib import Path
 
 from harbor.agents.base import BaseAgent
@@ -96,87 +96,103 @@ class PactOpenCodeAgent(BaseAgent):
         )
 
         loop_id = str(self.context_id or self.session_id or "harbor-trial").replace("/", "-")
-        git_archive = f"/opt/pact/original-git-{loop_id}.tar.enc"
-        git_archive_key = secrets.token_urlsafe(48)
-        isolate_git = await environment.exec(
-            command=self._isolate_git_command(git_archive),
-            cwd=project_root,
-            env={"PACT_GIT_ARCHIVE_KEY": git_archive_key},
-        )
-        if isolate_git.return_code != 0:
-            raise RuntimeError("Failed to isolate task git history before the PACT agent phase")
+        git_archive = f"/opt/pact/original-git-{loop_id}.tar"
+        with tempfile.TemporaryDirectory(prefix="pact-git-history-") as archive_dir:
+            local_git_archive = Path(archive_dir) / "original-git.tar"
+            archive_git = await environment.exec(
+                command=self._archive_git_command(git_archive),
+                cwd=project_root,
+            )
+            if archive_git.return_code != 0:
+                raise RuntimeError("Failed to archive task git history before the PACT agent phase")
+            await environment.download_file(git_archive, local_git_archive)
 
-        model = self.model_name or "openrouter/z-ai/glm-5.2"
-        config = {
-            "model": model,
-            "small_model": model,
-            "snapshot": False,
-            "provider": {
-                "openrouter": {
-                    "npm": "@openrouter/ai-sdk-provider",
-                    "models": {"z-ai/glm-5.2": {"name": "Z.ai GLM 5.2"}},
-                }
-            },
-            "permission": {"webfetch": "deny", "websearch": "deny"},
-            "mcp": {},
-        }
-        command = " ".join(
-            shlex.quote(part)
-            for part in [
-                "/opt/pact-runtime/bin/bun",
-                "/opt/pact/plugins/pact-harbor-run.ts",
-                "--project-root",
-                project_root,
-                "--instruction-file",
-                "/opt/pact/instruction.md",
-                "--harness-dir",
-                "/opt/pact/harness",
-                "--max-rounds",
-                str(self.max_rounds),
-                "--model",
-                model,
-                "--reviewer-model",
-                self.reviewer_model,
-                "--worker-agent",
-                self.worker_agent,
-                "--reviewer-agent",
-                self.reviewer_agent,
-                "--worker-completion-grace-ms",
-                str(self.worker_completion_grace_ms),
-                "--reviewer-completion-grace-ms",
-                str(self.reviewer_completion_grace_ms),
-                "--loop-id",
-                loop_id,
-            ]
-        )
-        pact_command = f"export PATH=/opt/pact-runtime/bin:$PATH; {command} 2>&1 | tee /logs/agent/pact-driver.log"
-        result = None
-        try:
-            result = await environment.exec(
-                command=f"bash -o pipefail -c {shlex.quote(pact_command)}",
+            isolate_git = await environment.exec(
+                command=self._activate_isolated_git_command(git_archive),
                 cwd=project_root,
-                env={
-                    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
-                    "OPENCODE_CONFIG_CONTENT": json.dumps(config, separators=(",", ":")),
+            )
+            if isolate_git.return_code != 0:
+                await self._restore_git_history(
+                    environment,
+                    project_root,
+                    local_git_archive,
+                    git_archive,
+                )
+                raise RuntimeError("Failed to isolate task git history before the PACT agent phase")
+
+            model = self.model_name or "openrouter/z-ai/glm-5.2"
+            config = {
+                "model": model,
+                "small_model": model,
+                "snapshot": False,
+                "provider": {
+                    "openrouter": {
+                        "npm": "@openrouter/ai-sdk-provider",
+                        "models": {"z-ai/glm-5.2": {"name": "Z.ai GLM 5.2"}},
+                    }
                 },
-                timeout_sec=None,
+                "permission": {"webfetch": "deny", "websearch": "deny"},
+                "mcp": {},
+            }
+            command = " ".join(
+                shlex.quote(part)
+                for part in [
+                    "/opt/pact-runtime/bin/bun",
+                    "/opt/pact/plugins/pact-harbor-run.ts",
+                    "--project-root",
+                    project_root,
+                    "--instruction-file",
+                    "/opt/pact/instruction.md",
+                    "--harness-dir",
+                    "/opt/pact/harness",
+                    "--max-rounds",
+                    str(self.max_rounds),
+                    "--model",
+                    model,
+                    "--reviewer-model",
+                    self.reviewer_model,
+                    "--worker-agent",
+                    self.worker_agent,
+                    "--reviewer-agent",
+                    self.reviewer_agent,
+                    "--worker-completion-grace-ms",
+                    str(self.worker_completion_grace_ms),
+                    "--reviewer-completion-grace-ms",
+                    str(self.reviewer_completion_grace_ms),
+                    "--loop-id",
+                    loop_id,
+                ]
             )
-            await environment.exec(
-                command=(
-                    "mkdir -p /logs/agent/pact && "
-                    "cp -R .pact/loops /logs/agent/pact/ 2>/dev/null || true; "
-                    "git diff --binary --no-ext-diff > /logs/agent/final.patch"
-                ),
-                cwd=project_root,
+            pact_command = (
+                f"export PATH=/opt/pact-runtime/bin:$PATH; {command} "
+                "2>&1 | tee /logs/agent/pact-driver.log"
             )
-        finally:
-            restore_git = await environment.exec(
-                command=self._restore_git_command(git_archive),
-                cwd=project_root,
-                env={"PACT_GIT_ARCHIVE_KEY": git_archive_key},
-            )
-            if restore_git.return_code != 0:
-                raise RuntimeError("Failed to restore task git history for the Harbor verifier phase")
+            result = None
+            try:
+                result = await environment.exec(
+                    command=f"bash -o pipefail -c {shlex.quote(pact_command)}",
+                    cwd=project_root,
+                    env={
+                        "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+                        "OPENCODE_CONFIG_CONTENT": json.dumps(config, separators=(",", ":")),
+                    },
+                    timeout_sec=None,
+                )
+                await environment.exec(
+                    command=(
+                        "mkdir -p /logs/agent/pact && "
+                        "cp -R .pact/loops /logs/agent/pact/ 2>/dev/null || true; "
+                        "git diff --binary --no-ext-diff > /logs/agent/final.patch"
+                    ),
+                    cwd=project_root,
+                )
+            finally:
+                await self._restore_git_history(
+                    environment,
+                    project_root,
+                    local_git_archive,
+                    git_archive,
+                )
 
         assert result is not None
         context.metadata = {
@@ -191,16 +207,23 @@ class PactOpenCodeAgent(BaseAgent):
             raise RuntimeError(f"PACT driver exited with code {result.return_code}")
 
     @staticmethod
-    def _isolate_git_command(git_archive: str) -> str:
+    def _archive_git_command(git_archive: str) -> str:
         archive = shlex.quote(git_archive)
         return (
             "set -euo pipefail; "
             "test -d .git; "
-            "command -v openssl >/dev/null; "
             f"rm -f {archive}; "
-            "tar -cf - .git | "
-            "openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt "
-            f"-pass env:PACT_GIT_ARCHIVE_KEY -out {archive}; "
+            f"tar -cf {archive} .git; "
+            f"test -s {archive}"
+        )
+
+    @staticmethod
+    def _activate_isolated_git_command(git_archive: str) -> str:
+        archive = shlex.quote(git_archive)
+        return (
+            "set -euo pipefail; "
+            f"test -s {archive}; "
+            f"rm -f {archive}; "
             "rm -rf .git; "
             "git init -q; "
             "git config user.email pact-harbor@localhost; "
@@ -217,11 +240,25 @@ class PactOpenCodeAgent(BaseAgent):
             "set -euo pipefail; "
             f"test -s {archive}; "
             "rm -rf .git; "
-            "openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 "
-            f"-pass env:PACT_GIT_ARCHIVE_KEY -in {archive} | tar -xf -; "
+            f"tar -xf {archive}; "
             f"rm -f {archive}; "
             "test -d .git; "
             "exclude=$(git rev-parse --git-path info/exclude); "
             "mkdir -p \"$(dirname \"$exclude\")\"; "
             "grep -qxF '.pact/' \"$exclude\" 2>/dev/null || printf '%s\\n' '.pact/' >> \"$exclude\""
         )
+
+    async def _restore_git_history(
+        self,
+        environment: BaseEnvironment,
+        project_root: str,
+        local_git_archive: Path,
+        git_archive: str,
+    ) -> None:
+        await environment.upload_file(local_git_archive, git_archive)
+        restore_git = await environment.exec(
+            command=self._restore_git_command(git_archive),
+            cwd=project_root,
+        )
+        if restore_git.return_code != 0:
+            raise RuntimeError("Failed to restore task git history for the Harbor verifier phase")

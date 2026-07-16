@@ -296,6 +296,7 @@ export function runPactDriver(input: {
       containerWorkspace: input.workerContainerWorkspace ?? "/workspace/pact-workspace",
       workerPluginMount: input.workerPluginMount,
       workerContainerPluginMount: input.workerContainerPluginMount ?? "/opt/opencode-pact-plugins",
+      database: invocationDatabase,
     })
     const result = spawnOpenCodeRun({
       spawn,
@@ -2239,6 +2240,7 @@ function buildWorkerInvocation(input: {
   containerWorkspace: string
   workerPluginMount?: string
   workerContainerPluginMount: string
+  database: string
 }): { command: string; args: string[] } {
   if (input.runner === "host") {
     return { command: input.opencodeCommand, args: input.opencodeArgs }
@@ -2260,6 +2262,8 @@ function buildWorkerInvocation(input: {
     "OPENCODE_DB",
     "-e",
     `XDG_STATE_HOME=${isolatedOpenCodeStateHome("/tmp")}`,
+    "-e",
+    `XDG_DATA_HOME=${isolatedOpenCodeDataHome(input.database, "/tmp")}`,
     "-v",
     `${input.projectRoot}:${input.containerWorkspace}`,
     "-w",
@@ -2377,10 +2381,12 @@ function spawnOpenCodeRun(input: {
   completionGraceMs?: number
   database?: string
 }): SpawnResult {
+  const database = input.database ?? isolatedOpenCodeDatabase()
   const childEnv = {
     ...env,
-    OPENCODE_DB: input.database ?? isolatedOpenCodeDatabase(),
+    OPENCODE_DB: database,
     XDG_STATE_HOME: isolatedOpenCodeStateHome(),
+    XDG_DATA_HOME: isolatedOpenCodeDataHome(database),
   }
   const targetCommand = input.shellTrampoline ? "/bin/sh" : input.command
   const targetArgs = input.shellTrampoline
@@ -2423,6 +2429,10 @@ function isolatedOpenCodeDatabase(): string {
 function isolatedOpenCodeStateHome(base = tmpdir()): string {
   opencodeStateCounter += 1
   return join(base, `pact-opencode-state-${process.pid}-${Date.now()}-${opencodeStateCounter}`)
+}
+
+function isolatedOpenCodeDataHome(database: string, base = tmpdir()): string {
+  return join(base, `pact-opencode-data-${database.replace(/[^a-zA-Z0-9._-]/g, "-")}`)
 }
 
 const OPENCODE_ARTIFACT_COMPLETION_GUARD = String.raw`

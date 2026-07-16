@@ -27,6 +27,7 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
                         SimpleNamespace(return_code=0, stdout="/app\n", stderr=""),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
+                        SimpleNamespace(return_code=0, stdout="", stderr=""),
                         SimpleNamespace(return_code=0, stdout="ok", stderr=""),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
@@ -34,6 +35,7 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
                 ),
                 upload_dir=AsyncMock(),
                 upload_file=AsyncMock(),
+                download_file=AsyncMock(),
             )
             agent = PactOpenCodeAgent(
                 logs_dir=logs,
@@ -50,17 +52,24 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
 
             uploaded_targets = [call.kwargs["target_dir"] for call in environment.upload_dir.await_args_list]
             self.assertEqual(uploaded_targets, ["/opt/pact/plugins", "/opt/pact/harness"])
-            environment.upload_file.assert_awaited_once()
-            isolate_call = environment.exec.await_args_list[4]
+            uploaded_targets = [call.args[1] for call in environment.upload_file.await_args_list]
+            self.assertEqual(uploaded_targets[0], "/opt/pact/instruction.md")
+            self.assertRegex(uploaded_targets[1], r"^/opt/pact/original-git-.+\.tar$")
+
+            archive_call = environment.exec.await_args_list[4]
+            archive_command = archive_call.kwargs["command"]
+            self.assertIn("tar -cf", archive_command)
+            self.assertNotIn("openssl", archive_command)
+            environment.download_file.assert_awaited_once()
+
+            isolate_call = environment.exec.await_args_list[5]
             isolate_command = isolate_call.kwargs["command"]
-            self.assertIn("openssl enc -aes-256-cbc", isolate_command)
             self.assertIn("rm -rf .git", isolate_command)
             self.assertIn("git init -q", isolate_command)
             self.assertIn("git rev-list --all --count", isolate_command)
-            archive_key = isolate_call.kwargs["env"]["PACT_GIT_ARCHIVE_KEY"]
-            self.assertNotIn(archive_key, isolate_command)
+            self.assertNotIn("openssl", isolate_command)
 
-            command_call = environment.exec.await_args_list[5]
+            command_call = environment.exec.await_args_list[6]
             command = command_call.kwargs["command"]
             self.assertIn("pact-harbor-run.ts", command)
             self.assertIn("export PATH=/opt/pact-runtime/bin:$PATH", command)
@@ -79,12 +88,17 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(config["permission"]["websearch"], "deny")
             self.assertNotIn("PACT_GIT_ARCHIVE_KEY", command_call.kwargs["env"])
 
-            restore_call = environment.exec.await_args_list[7]
+            restore_call = environment.exec.await_args_list[8]
             restore_command = restore_call.kwargs["command"]
-            self.assertIn("openssl enc -d -aes-256-cbc", restore_command)
+            self.assertIn("tar -xf", restore_command)
+            self.assertNotIn("openssl", restore_command)
             self.assertIn("test -d .git", restore_command)
             self.assertIn(".pact/", restore_command)
-            self.assertEqual(restore_call.kwargs["env"]["PACT_GIT_ARCHIVE_KEY"], archive_key)
+
+            downloaded_archive = environment.download_file.await_args.args[1]
+            uploaded_archive = environment.upload_file.await_args_list[1].args[0]
+            self.assertEqual(downloaded_archive, uploaded_archive)
+            self.assertFalse(Path(uploaded_archive).exists())
 
     async def test_restores_original_git_history_when_pact_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -99,12 +113,14 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
                         SimpleNamespace(return_code=0, stdout="/app\n", stderr=""),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
+                        SimpleNamespace(return_code=0, stdout="", stderr=""),
                         SimpleNamespace(return_code=1, stdout="", stderr="failed"),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
                         SimpleNamespace(return_code=0, stdout="", stderr=""),
                     ]
                 ),
                 upload_file=AsyncMock(),
+                download_file=AsyncMock(),
             )
             agent = PactOpenCodeAgent(
                 logs_dir=root / "logs",
@@ -117,11 +133,10 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
                 await agent.run("Fix the requested behavior.", environment, AgentContext())
 
             restore_call = environment.exec.await_args_list[-1]
-            self.assertIn("openssl enc -d -aes-256-cbc", restore_call.kwargs["command"])
-            self.assertEqual(
-                restore_call.kwargs["env"]["PACT_GIT_ARCHIVE_KEY"],
-                environment.exec.await_args_list[2].kwargs["env"]["PACT_GIT_ARCHIVE_KEY"],
-            )
+            self.assertIn("tar -xf", restore_call.kwargs["command"])
+            self.assertNotIn("openssl", restore_call.kwargs["command"])
+            environment.download_file.assert_awaited_once()
+            self.assertEqual(environment.upload_file.await_count, 2)
 
 
 if __name__ == "__main__":
