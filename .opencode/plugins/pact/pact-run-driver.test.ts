@@ -739,6 +739,7 @@ Continue source changes.
       expect(calls[0]?.args).toContain("OPENROUTER_BASE_URL")
       expect(calls[0]?.args).toContain("OPENCODE_CONFIG")
       expect(calls[0]?.args).toContain("OPENCODE_DB")
+      expect(calls[0]?.args.some((arg) => arg.startsWith("XDG_STATE_HOME=/tmp/pact-opencode-state-"))).toBeTrue()
       const configArg = calls[0]?.args.find((arg) => arg.startsWith("OPENCODE_CONFIG_CONTENT=")) ?? ""
       expect(configArg).toContain("/opt/opencode-pact-plugins/pact.ts")
       expect(configArg).not.toContain(pluginDir)
@@ -1024,6 +1025,7 @@ AC-1: PARTIAL.
       prompt: string
       stdin?: string
       database?: string
+      stateHome?: string
     }> = []
     let loopDir = ""
 
@@ -1048,6 +1050,7 @@ AC-1: PARTIAL.
           prompt,
           stdin: options.input,
           database: options.env?.OPENCODE_DB,
+          stateHome: options.env?.XDG_STATE_HOME,
         })
         if (prompt.startsWith("# PACT Review Round")) {
           return {
@@ -1088,6 +1091,9 @@ Continue after factual artifact inspection.
     expect(calls[0]?.database).toStartWith("pact-")
     expect(calls[1]?.database).toStartWith("pact-")
     expect(calls[1]?.database).not.toBe(calls[0]?.database)
+    expect(calls[0]?.stateHome).toStartWith(tmpdir())
+    expect(calls[1]?.stateHome).toStartWith(tmpdir())
+    expect(calls[1]?.stateHome).not.toBe(calls[0]?.stateHome)
     expect(readFileSync(join(loopDir, "round-01-review.md"), "utf-8")).toContain(
       "Continue after factual artifact inspection",
     )
@@ -1655,7 +1661,13 @@ exit 0
 
   test("can explicitly opt in to same-session continuation", () => {
     const project = tempGitProject()
-    const calls: Array<{ args: string[]; input: string; stdin?: string; database?: string }> = []
+    const calls: Array<{
+      args: string[]
+      input: string
+      stdin?: string
+      database?: string
+      stateHome?: string
+    }> = []
     let loopDir = ""
 
     const result = runPactDriver({
@@ -1676,6 +1688,7 @@ exit 0
           input: opencodePromptArg(args),
           stdin: options.input,
           database: options.env?.OPENCODE_DB,
+          stateHome: options.env?.XDG_STATE_HOME,
         })
         if (calls.length === 1) {
           const state = readState(loopDir)
@@ -1708,6 +1721,9 @@ exit 0
     expect(calls[1]?.stdin).toBe("")
     expect(calls[0]?.database).toStartWith("pact-")
     expect(calls[1]?.database).toBe(calls[0]?.database)
+    expect(calls[0]?.stateHome).toStartWith(tmpdir())
+    expect(calls[1]?.stateHome).toStartWith(tmpdir())
+    expect(calls[1]?.stateHome).not.toBe(calls[0]?.stateHome)
   })
 
   test("does not reuse a stale loop when driver-owned planner fails", () => {

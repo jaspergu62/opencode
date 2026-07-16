@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSyn
 import { spawnSync as nodeSpawnSync } from "node:child_process"
 import { cwd, env, exit, argv } from "node:process"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
+import { tmpdir } from "node:os"
 
 import {
   appendRoundEvent,
@@ -58,6 +59,7 @@ import {
 
 const OPENCODE_RUN_MAX_BUFFER = 100 * 1024 * 1024
 let opencodeDatabaseCounter = 0
+let opencodeStateCounter = 0
 
 type SpawnResult = {
   status: number | null
@@ -2256,6 +2258,8 @@ function buildWorkerInvocation(input: {
     `PACT_PROJECT_ROOT=${input.containerWorkspace}`,
     "-e",
     "OPENCODE_DB",
+    "-e",
+    `XDG_STATE_HOME=${isolatedOpenCodeStateHome("/tmp")}`,
     "-v",
     `${input.projectRoot}:${input.containerWorkspace}`,
     "-w",
@@ -2376,6 +2380,7 @@ function spawnOpenCodeRun(input: {
   const childEnv = {
     ...env,
     OPENCODE_DB: input.database ?? isolatedOpenCodeDatabase(),
+    XDG_STATE_HOME: isolatedOpenCodeStateHome(),
   }
   const targetCommand = input.shellTrampoline ? "/bin/sh" : input.command
   const targetArgs = input.shellTrampoline
@@ -2413,6 +2418,11 @@ function spawnOpenCodeRun(input: {
 function isolatedOpenCodeDatabase(): string {
   opencodeDatabaseCounter += 1
   return `pact-${process.pid}-${Date.now()}-${opencodeDatabaseCounter}.db`
+}
+
+function isolatedOpenCodeStateHome(base = tmpdir()): string {
+  opencodeStateCounter += 1
+  return join(base, `pact-opencode-state-${process.pid}-${Date.now()}-${opencodeStateCounter}`)
 }
 
 const OPENCODE_ARTIFACT_COMPLETION_GUARD = String.raw`
