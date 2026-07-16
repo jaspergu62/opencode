@@ -1586,6 +1586,68 @@ esac
     )
   })
 
+  test("worker artifact completion guard ignores a stale finalize summary until it changes", () => {
+    const project = tempGitProject()
+    const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-finalize-retry-guard-bin-"))
+    tempDirs.push(binDir)
+    const fakeOpencode = join(binDir, "fake-opencode")
+    writeFileSync(
+      fakeOpencode,
+      `#!/bin/sh
+loop_dir=$(find "$PWD/.pact/loops" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+case "$*" in
+  *"PACT Finalize Phase"*)
+    if [ -f "$PWD/finalize-first-run" ]; then
+      sleep 0.5
+      printf '%s\n' '# Finalize Contract' 'Mutation Allowed: no' > "$loop_dir/round-04-contract.md"
+      printf '%s\n' '# Finalize Summary' 'Retry verification completed.' > "$loop_dir/finalize-summary.md"
+      sleep 1
+      touch "$PWD/finalize-retry-ran-past-artifact"
+    else
+      touch "$PWD/finalize-first-run"
+      printf '%s\n' '# Finalize Contract' 'Mutation Allowed: no' > "$loop_dir/round-03-contract.md"
+      printf '%s\n' '# Finalize Summary' 'Initial verification completed.' > "$loop_dir/finalize-summary.md"
+    fi
+    ;;
+  *"PACT Review Phase 02"*)
+    printf '%s\n' '# Review Phase Summary' 'Code review completed.' > "$loop_dir/round-02-summary.md"
+    ;;
+  *)
+    printf '%s\n' '# Worker Summary' 'Focused verification completed.' > "$loop_dir/round-01-summary.md"
+    printf '%s\n' 'worker change' >> "$PWD/src.txt"
+    ;;
+esac
+`,
+      "utf-8",
+    )
+    chmodSync(fakeOpencode, 0o755)
+    let reviews = 0
+
+    const result = runPactDriver({
+      projectRoot: project,
+      planFile: join(project, "plan.md"),
+      model: "openrouter/z-ai/glm-5.2",
+      maxRounds: 1,
+      opencodeCommand: fakeOpencode,
+      workerCompletionGraceMs: 100,
+      maxInvocations: 4,
+      planner() {
+        return validPlannerOutput()
+      },
+      reviewer() {
+        reviews += 1
+        return reviews === 3 ? "### Decision Summary\nContinue.\n\nPACT_CONTINUE\n" : "### Decision Summary\nComplete.\n\nPACT_COMPLETE\n"
+      },
+    })
+
+    expect(result.loopDir).toBeDefined()
+    expect(existsSync(join(result.loopDir!, "round-04-contract.md"))).toBe(true)
+    expect(readFileSync(join(result.loopDir!, "finalize-summary.md"), "utf-8")).toContain(
+      "Retry verification completed",
+    )
+    expect(existsSync(join(project, "finalize-retry-ran-past-artifact"))).toBe(false)
+  })
+
   test("default OpenCode runner times out hung commands", () => {
     const project = tempGitProject()
     const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-timeout-bin-"))

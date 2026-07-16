@@ -2453,6 +2453,15 @@ process.stdin.setEncoding("utf8")
 process.stdin.on("data", (chunk) => { requestText += chunk })
 process.stdin.on("end", () => {
   const request = JSON.parse(requestText)
+  const readArtifactSignature = () => {
+    try {
+      const stat = fs.statSync(request.artifact)
+      return String(stat.size) + ":" + String(stat.mtimeMs)
+    } catch {
+      return undefined
+    }
+  }
+  const initialArtifactSignature = readArtifactSignature()
   const child = spawn(request.command, request.args, {
     cwd: request.cwd,
     env: process.env,
@@ -2469,7 +2478,8 @@ process.stdin.on("end", () => {
   child.stdout.on("data", (chunk) => stdout.push(chunk))
   child.stderr.on("data", (chunk) => stderr.push(chunk))
 
-  let artifactSignature
+  let artifactSignature = initialArtifactSignature
+  let artifactUpdated = false
   let stableSince = 0
   let guarded = false
   let killTimer
@@ -2482,10 +2492,11 @@ process.stdin.on("end", () => {
       const signature = String(stat.size) + ":" + String(stat.mtimeMs)
       if (signature !== artifactSignature) {
         artifactSignature = signature
+        artifactUpdated = true
         stableSince = Date.now()
         return
       }
-      if (stableSince && Date.now() - stableSince >= graceMs) {
+      if (artifactUpdated && stableSince && Date.now() - stableSince >= graceMs) {
         guarded = true
         clearInterval(poll)
         stderr.push(Buffer.from("[PACT] OpenCode artifact completion guard closed a non-exiting process after the required artifact stabilized.\n"))
@@ -2495,6 +2506,7 @@ process.stdin.on("end", () => {
         }, 5000)
       }
     } catch {
+      if (artifactSignature !== undefined) artifactUpdated = true
       artifactSignature = undefined
       stableSince = 0
     }
