@@ -741,6 +741,7 @@ Continue source changes.
       expect(calls[0]?.args).toContain("OPENCODE_DB")
       expect(calls[0]?.args.some((arg) => arg.startsWith("XDG_STATE_HOME=/tmp/pact-opencode-state-"))).toBeTrue()
       expect(calls[0]?.args.some((arg) => arg.startsWith("XDG_DATA_HOME=/tmp/pact-opencode-data-"))).toBeTrue()
+      expect(calls[0]?.args.some((arg) => arg.startsWith("TMPDIR=/tmp/pact-opencode-tmp-"))).toBeTrue()
       const configArg = calls[0]?.args.find((arg) => arg.startsWith("OPENCODE_CONFIG_CONTENT=")) ?? ""
       expect(configArg).toContain("/opt/opencode-pact-plugins/pact.ts")
       expect(configArg).not.toContain(pluginDir)
@@ -1028,6 +1029,7 @@ AC-1: PARTIAL.
       database?: string
       stateHome?: string
       dataHome?: string
+      tempHome?: string
     }> = []
     let loopDir = ""
 
@@ -1054,6 +1056,7 @@ AC-1: PARTIAL.
           database: options.env?.OPENCODE_DB,
           stateHome: options.env?.XDG_STATE_HOME,
           dataHome: options.env?.XDG_DATA_HOME,
+          tempHome: options.env?.TMPDIR,
         })
         if (prompt.startsWith("# PACT Review Round")) {
           return {
@@ -1100,6 +1103,9 @@ Continue after factual artifact inspection.
     expect(calls[0]?.dataHome).toStartWith(tmpdir())
     expect(calls[1]?.dataHome).toStartWith(tmpdir())
     expect(calls[1]?.dataHome).not.toBe(calls[0]?.dataHome)
+    expect(calls[0]?.tempHome).toStartWith(tmpdir())
+    expect(calls[1]?.tempHome).toStartWith(tmpdir())
+    expect(calls[1]?.tempHome).not.toBe(calls[0]?.tempHome)
     expect(readFileSync(join(loopDir, "round-01-review.md"), "utf-8")).toContain(
       "Continue after factual artifact inspection",
     )
@@ -1674,6 +1680,7 @@ exit 0
       database?: string
       stateHome?: string
       dataHome?: string
+      tempHome?: string
     }> = []
     let loopDir = ""
 
@@ -1697,6 +1704,7 @@ exit 0
           database: options.env?.OPENCODE_DB,
           stateHome: options.env?.XDG_STATE_HOME,
           dataHome: options.env?.XDG_DATA_HOME,
+          tempHome: options.env?.TMPDIR,
         })
         if (calls.length === 1) {
           const state = readState(loopDir)
@@ -1735,6 +1743,9 @@ exit 0
     expect(calls[0]?.dataHome).toStartWith(tmpdir())
     expect(calls[1]?.dataHome).toStartWith(tmpdir())
     expect(calls[1]?.dataHome).toBe(calls[0]?.dataHome)
+    expect(calls[0]?.tempHome).toStartWith(tmpdir())
+    expect(calls[1]?.tempHome).toStartWith(tmpdir())
+    expect(calls[1]?.tempHome).not.toBe(calls[0]?.tempHome)
   })
 
   test("does not reuse a stale loop when driver-owned planner fails", () => {
