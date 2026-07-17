@@ -1,0 +1,37 @@
+{
+  "schema": "pact-harness-change/v1",
+  "id": "swepro-ahe-v2",
+  "base": "swepro-ahe-v1",
+  "optimization_surface": "workflow/schema",
+  "predicted_fixes": [
+    "Replace narrative proof with an append-only evidence ledger keyed by subject, oracle family, observable boundary, final-state fingerprint, and reviewer admission state.",
+    "Require executable negative, sentinel, error-identity, and lifecycle evidence at the externally observable boundary when those behaviors are changed; source inspection alone cannot close them.",
+    "Add a compatibility ledger for added, removed, renamed, rebound, or signature-changed symbols. Completion requires affected-consumer discovery and compilation or an explicit compatibility adapter.",
+    "Classify requirement claims as normative, derived, or risk-inferred. Exact literals and removals become blocking only when supported by normative text or a concrete consumer contract, avoiding rounds spent on uncloseable underspecification.",
+    "Make authoritative final-state verification dominant over worker probes and reviewer inference, while allowing unavailable verification only when all selected risk oracles have independent admitted evidence.",
+    "Introduce bounded objective packets, inspection and command budgets, stable evidence carry-forward, and a reserved gate-output budget to reduce worker and reviewer exhaustion or parse failure.",
+    "Allow no-mutation review and finalize contracts to be embedded in the summary and terminal gate record, preventing an otherwise complete patch from consuming another round solely to materialize a process file.",
+    "Permit at most one unchanged-fingerprint evidence-closure round and require every continuation to name one falsifiable, worker-closeable next action."
+  ],
+  "risks": [
+    "Consumer-compatibility checks may preserve a small adapter when an imported requirement genuinely intends a hard removal.",
+    "Boundary-specific counterexamples add focused verification cost for patches with many independent behavioral surfaces.",
+    "Default inspection and command budgets may be too small for unusually broad changes; the planner may scale them only with a recorded reason and retained output reserve.",
+    "Treating underspecified exact values as bounded risk can miss an unstated external convention when no discoverable consumer or authoritative verifier exposes it.",
+    "Embedded no-mutation contracts reduce standalone artifact uniformity; the full reviewer snapshot and fingerprint remain mandatory for traceability.",
+    "Older consumers may ignore new ledger fields, so existing manifest keys, Status Delta framing, and terminal markers are retained."
+  ],
+  "changed_files": [
+    "manifest.json",
+    "change_manifest.json",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md"
+  ],
+  "rationale": "Repeated false-complete outcomes came from proving code shape while missing observable error, sentinel, ownership, or consumer-compilation behavior. Repeated non-terminal outcomes came from malformed or omitted snapshots, process-only artifacts, uncloseable exact-value assumptions, and oversized reviewer work. The v2 overlay therefore changes the data model and gate inputs: provenance, boundary evidence, compatibility closure, evidence admission, closeable next actions, and final-state authority are explicit schema elements rather than additional prose requirements."
+}

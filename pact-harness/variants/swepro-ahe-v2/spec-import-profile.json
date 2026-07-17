@@ -1,0 +1,74 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "swepro-ahe-v2",
+  "optimization_surface": "workflow/schema",
+  "candidate_scope": [
+    "manifest.json",
+    "change_manifest.json",
+    "templates/*.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json"
+  ],
+  "protected_scope": [
+    "PACT runtime implementation",
+    "runner implementation",
+    "benchmark inputs",
+    "authoritative verifier inputs"
+  ],
+  "promotion_policy": "guarded",
+  "requirement_provenance": [
+    "normative",
+    "derived",
+    "risk_inferred"
+  ],
+  "oracle_families": [
+    "NORMATIVE_EXACTNESS",
+    "API_SHAPE_BINDING",
+    "CONSUMER_COMPATIBILITY",
+    "POSITIVE_BEHAVIOR",
+    "NEGATIVE_ERROR_SENTINEL",
+    "STATE_LIFECYCLE",
+    "INTEGRATION_PROPAGATION",
+    "BUILD_STATIC",
+    "REGRESSION",
+    "PATCH_INTEGRITY"
+  ],
+  "budget_defaults": {
+    "worker_file_inspections": 12,
+    "worker_commands": 8,
+    "reviewer_reproduction_commands": 6,
+    "gate_output_reserve_percent": 35,
+    "unchanged_fingerprint_evidence_rounds": 1,
+    "scaling_rule": "The planner may increase a limit only for named high-impact subjects and must preserve the gate-output reserve."
+  },
+  "evidence_policy": {
+    "worker_results_are_candidates": true,
+    "reviewer_admission_required": true,
+    "high_impact_requires_independent_evidence": true,
+    "source_inspection_does_not_prove_behavior": true,
+    "stable_id_carry_forward": true
+  },
+  "compatibility_policy": {
+    "consumer_closure_for_contract_changes": true,
+    "removal_requires_normative_support": true,
+    "preserve_adapter_when_removal_is_ambiguous": true,
+    "final_consumer_compile_precedes_completion": true
+  },
+  "process_artifact_policy": {
+    "implementation_contract_before_mutation": true,
+    "embedded_contract_allowed_for_no_mutation_round": true,
+    "process_only_gap_cannot_force_repeated_unchanged_round": true
+  },
+  "evaluation_dimensions": [
+    "pass",
+    "resolved",
+    "stop_reason",
+    "round_count",
+    "review_parse_status",
+    "authoritative_verification_status",
+    "consumer_compatibility",
+    "boundary_oracle_coverage",
+    "timeout",
+    "patch_quality"
+  ]
+}
