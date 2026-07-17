@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -1114,6 +1114,52 @@ Continue after factual artifact inspection.
       reviewer_model: "openrouter/z-ai/glm-5.2",
       worker_model: "openrouter/z-ai/glm-5.2",
     })
+  })
+
+  test("opt-in OpenCode Git shim reports only the active worktree", () => {
+    const project = tempGitWorktreeProject()
+    const previous = process.env.PACT_OPENCODE_GIT_WORKTREE_SHIM
+    process.env.PACT_OPENCODE_GIT_WORKTREE_SHIM = "1"
+    let loopDir = ""
+    let shimOutput = ""
+    let shimPath = ""
+    try {
+      const result = runPactDriver({
+        projectRoot: project,
+        planFile: join(project, "plan.md"),
+        model: "openrouter/z-ai/glm-5.2",
+        maxRounds: 1,
+        opencodeCommand: "fake-opencode",
+        maxInvocations: 1,
+        planner(_prompt, context) {
+          loopDir = context.loopDir
+          return validPlannerOutput()
+        },
+        reviewer() {
+          return "Continue.\n"
+        },
+        spawnSync(_command, _args, options) {
+          shimPath = join((options.env?.PATH ?? "").split(":")[0] ?? "", "git")
+          shimOutput = execFileSync(shimPath, ["worktree", "list", "--porcelain"], {
+            cwd: project,
+            encoding: "utf-8",
+            env: options.env as NodeJS.ProcessEnv,
+          })
+          appendFileSync(join(project, "src.txt"), "worker change\n", "utf-8")
+          writeFileSync(join(loopDir, "round-01-summary.md"), "Worker changed src.txt.\n", "utf-8")
+          return { status: 0, stdout: "worker run\n", stderr: "" }
+        },
+      })
+
+      expect(result.status).toBe("stopped")
+      expect(shimPath).toContain("pact-opencode-git-shim-")
+      expect(existsSync(shimPath)).toBe(true)
+      expect(shimOutput.match(/^worktree /gm)).toHaveLength(1)
+      expect(shimOutput).toContain(`worktree ${realpathSync(project)}`)
+    } finally {
+      if (previous === undefined) delete process.env.PACT_OPENCODE_GIT_WORKTREE_SHIM
+      else process.env.PACT_OPENCODE_GIT_WORKTREE_SHIM = previous
+    }
   })
 
   test("failed public verification blocks reviewer-approved completion ledger updates", () => {

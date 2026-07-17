@@ -175,6 +175,7 @@ class PactOpenCodeAgent(BaseAgent):
                     env={
                         "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
                         "OPENCODE_CONFIG_CONTENT": json.dumps(config, separators=(",", ":")),
+                        "PACT_OPENCODE_GIT_WORKTREE_SHIM": "1",
                     },
                     timeout_sec=None,
                 )

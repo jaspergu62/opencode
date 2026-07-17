@@ -1,7 +1,7 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { spawnSync as nodeSpawnSync } from "node:child_process"
 import { cwd, env, exit, argv } from "node:process"
-import { basename, isAbsolute, join, relative, resolve } from "node:path"
+import { basename, delimiter, isAbsolute, join, relative, resolve } from "node:path"
 import { tmpdir } from "node:os"
 
 import {
@@ -2385,12 +2385,20 @@ function spawnOpenCodeRun(input: {
   database?: string
 }): SpawnResult {
   const database = input.database ?? isolatedOpenCodeDatabase()
+  const tempHome = isolatedOpenCodeTempHome()
+  const gitShim = env.PACT_OPENCODE_GIT_WORKTREE_SHIM === "1" ? installOpenCodeGitWorktreeShim(tempHome) : undefined
   const childEnv = {
     ...env,
     OPENCODE_DB: database,
     XDG_STATE_HOME: isolatedOpenCodeStateHome(),
     XDG_DATA_HOME: isolatedOpenCodeDataHome(database),
-    TMPDIR: isolatedOpenCodeTempHome(),
+    TMPDIR: tempHome,
+    ...(gitShim
+      ? {
+          PATH: `${gitShim.binDir}${delimiter}${env.PATH ?? ""}`,
+          PACT_REAL_GIT: gitShim.realGit,
+        }
+      : {}),
   }
   const targetCommand = input.shellTrampoline ? "/bin/sh" : input.command
   const targetArgs = input.shellTrampoline
@@ -2442,6 +2450,43 @@ function isolatedOpenCodeDataHome(database: string, base = tmpdir()): string {
 function isolatedOpenCodeTempHome(base = tmpdir()): string {
   opencodeTempCounter += 1
   return join(base, `pact-opencode-tmp-${process.pid}-${Date.now()}-${opencodeTempCounter}`)
+}
+
+function installOpenCodeGitWorktreeShim(tempHome: string): { binDir: string; realGit: string } {
+  const realGit = resolveExecutableFromPath("git")
+  if (!realGit) throw new Error("PACT OpenCode Git worktree shim requires git on PATH")
+  const binDir = join(tempHome, `pact-opencode-git-shim-${process.pid}-${Date.now()}`)
+  const shimPath = join(binDir, "git")
+  mkdirSync(binDir, { recursive: true })
+  writeFileSync(
+    shimPath,
+    `#!/bin/sh
+if [ "$1" = "worktree" ] && [ "$2" = "list" ] && [ "$3" = "--porcelain" ]; then
+  root=$("$PACT_REAL_GIT" rev-parse --show-toplevel 2>/dev/null) || exec "$PACT_REAL_GIT" "$@"
+  head=$("$PACT_REAL_GIT" rev-parse HEAD 2>/dev/null) || exec "$PACT_REAL_GIT" "$@"
+  printf 'worktree %s\\nHEAD %s\\n' "$root" "$head"
+  if branch=$("$PACT_REAL_GIT" symbolic-ref -q HEAD 2>/dev/null); then
+    printf 'branch %s\\n\\n' "$branch"
+  else
+    printf 'detached\\n\\n'
+  fi
+  exit 0
+fi
+exec "$PACT_REAL_GIT" "$@"
+`,
+    "utf-8",
+  )
+  chmodSync(shimPath, 0o755)
+  return { binDir, realGit }
+}
+
+function resolveExecutableFromPath(name: string): string | undefined {
+  for (const entry of (env.PATH ?? "").split(delimiter)) {
+    if (!entry) continue
+    const candidate = join(entry, name)
+    if (existsSync(candidate)) return candidate
+  }
+  return undefined
 }
 
 const OPENCODE_ARTIFACT_COMPLETION_GUARD = String.raw`

@@ -87,6 +87,7 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(config["permission"]["webfetch"], "deny")
             self.assertEqual(config["permission"]["websearch"], "deny")
             self.assertNotIn("PACT_GIT_ARCHIVE_KEY", command_call.kwargs["env"])
+            self.assertEqual(command_call.kwargs["env"]["PACT_OPENCODE_GIT_WORKTREE_SHIM"], "1")
 
             restore_call = environment.exec.await_args_list[8]
             restore_command = restore_call.kwargs["command"]
