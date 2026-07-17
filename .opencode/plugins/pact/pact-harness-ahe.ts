@@ -191,6 +191,13 @@ export function buildFailureBundle(currentBest: HarnessVariantResults, history: 
   for (const run of history) {
     const summary = summarizeHarnessVariant(run)
     lines.push("", `### ${run.harness_id}`, "", `Resolved ${summary.resolved}/${summary.total}; timeout ${summary.timeout}; infra ${summary.infra}.`)
+    const claims = harnessChangeClaims(run.harness_dir)
+    if (claims.predictedFixes.length) {
+      lines.push("", "Predicted fixes:", ...claims.predictedFixes.map((item) => `- ${item}`))
+    }
+    if (claims.risks.length) {
+      lines.push("", "Declared risks:", ...claims.risks.map((item) => `- ${item}`))
+    }
     for (const result of run.case_results) {
       lines.push(
         "",
@@ -213,6 +220,28 @@ export function buildFailureBundle(currentBest: HarnessVariantResults, history: 
     "",
   )
   return lines.join("\n")
+}
+
+function harnessChangeClaims(harnessDir: string): { predictedFixes: string[]; risks: string[] } {
+  const path = join(harnessDir, "change_manifest.json")
+  if (!existsSync(path)) return { predictedFixes: [], risks: [] }
+  try {
+    const manifest = JSON.parse(readFileSync(path, "utf-8")) as {
+      predicted_fixes?: unknown
+      risks?: unknown
+      risk_cases?: unknown
+    }
+    return {
+      predictedFixes: stringArray(manifest.predicted_fixes),
+      risks: [...stringArray(manifest.risks), ...stringArray(manifest.risk_cases)],
+    }
+  } catch {
+    return { predictedFixes: [], risks: [] }
+  }
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
 }
 
 function generateCodexVariant(input: AheVariantGeneratorInput, codexCommand: string, worktreeDir: string): string {

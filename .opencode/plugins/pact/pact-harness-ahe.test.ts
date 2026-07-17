@@ -95,6 +95,8 @@ describe("PACT AHE sequential evolution", () => {
 
   test("feeds both PACT decisions and Harbor hidden failures into the next improve phase", () => {
     const root = tempDir("pact-ahe-failure-bundle-")
+    const harnessDir = join(root, "harness")
+    writeHarness(harnessDir, "candidate")
     const loopDir = join(root, "agent", "pact", "loops", "trial")
     const verifierDir = join(root, "verifier")
     mkdirSync(loopDir, { recursive: true })
@@ -104,7 +106,7 @@ describe("PACT AHE sequential evolution", () => {
     writeFileSync(join(verifierDir, "reward.txt"), "0")
     const run: HarnessVariantResults = {
       harness_id: "candidate",
-      harness_dir: "/tmp/candidate",
+      harness_dir: harnessDir,
       case_results: [
         {
           case_id: "case-a",
@@ -119,5 +121,6 @@ describe("PACT AHE sequential evolution", () => {
     expect(bundle).toContain("reviewer believed the patch was complete")
     expect(bundle).toContain("HIDDEN_FAILURE_SIGNATURE")
     expect(bundle).toContain("verifier/test-stdout.txt")
+    expect(bundle).toContain("Predicted fixes:\n- case-b")
   })
 })
