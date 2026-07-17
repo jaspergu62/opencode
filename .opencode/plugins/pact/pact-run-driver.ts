@@ -60,6 +60,7 @@ import {
 const OPENCODE_RUN_MAX_BUFFER = 100 * 1024 * 1024
 let opencodeDatabaseCounter = 0
 let opencodeStateCounter = 0
+let opencodeCacheCounter = 0
 let opencodeTempCounter = 0
 
 type SpawnResult = {
@@ -2392,6 +2393,7 @@ function spawnOpenCodeRun(input: {
     OPENCODE_DB: database,
     XDG_STATE_HOME: isolatedOpenCodeStateHome(),
     XDG_DATA_HOME: isolatedOpenCodeDataHome(database),
+    XDG_CACHE_HOME: isolatedOpenCodeCacheHome(),
     TMPDIR: tempHome,
     ...(gitShim
       ? {
@@ -2445,6 +2447,11 @@ function isolatedOpenCodeStateHome(base = tmpdir()): string {
 
 function isolatedOpenCodeDataHome(database: string, base = tmpdir()): string {
   return join(base, `pact-opencode-data-${database.replace(/[^a-zA-Z0-9._-]/g, "-")}`)
+}
+
+function isolatedOpenCodeCacheHome(base = tmpdir()): string {
+  opencodeCacheCounter += 1
+  return join(base, `pact-opencode-cache-${process.pid}-${Date.now()}-${opencodeCacheCounter}`)
 }
 
 function isolatedOpenCodeTempHome(base = tmpdir()): string {

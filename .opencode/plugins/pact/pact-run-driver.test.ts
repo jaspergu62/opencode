@@ -1029,6 +1029,7 @@ AC-1: PARTIAL.
       database?: string
       stateHome?: string
       dataHome?: string
+      cacheHome?: string
       tempHome?: string
     }> = []
     let loopDir = ""
@@ -1056,6 +1057,7 @@ AC-1: PARTIAL.
           database: options.env?.OPENCODE_DB,
           stateHome: options.env?.XDG_STATE_HOME,
           dataHome: options.env?.XDG_DATA_HOME,
+          cacheHome: options.env?.XDG_CACHE_HOME,
           tempHome: options.env?.TMPDIR,
         })
         if (prompt.startsWith("# PACT Review Round")) {
@@ -1103,6 +1105,9 @@ Continue after factual artifact inspection.
     expect(calls[0]?.dataHome).toStartWith(tmpdir())
     expect(calls[1]?.dataHome).toStartWith(tmpdir())
     expect(calls[1]?.dataHome).not.toBe(calls[0]?.dataHome)
+    expect(calls[0]?.cacheHome).toStartWith(tmpdir())
+    expect(calls[1]?.cacheHome).toStartWith(tmpdir())
+    expect(calls[1]?.cacheHome).not.toBe(calls[0]?.cacheHome)
     expect(calls[0]?.tempHome).toStartWith(tmpdir())
     expect(calls[1]?.tempHome).toStartWith(tmpdir())
     expect(calls[1]?.tempHome).not.toBe(calls[0]?.tempHome)
@@ -1788,6 +1793,7 @@ exit 0
       database?: string
       stateHome?: string
       dataHome?: string
+      cacheHome?: string
       tempHome?: string
     }> = []
     let loopDir = ""
@@ -1812,6 +1818,7 @@ exit 0
           database: options.env?.OPENCODE_DB,
           stateHome: options.env?.XDG_STATE_HOME,
           dataHome: options.env?.XDG_DATA_HOME,
+          cacheHome: options.env?.XDG_CACHE_HOME,
           tempHome: options.env?.TMPDIR,
         })
         if (calls.length === 1) {
@@ -1851,6 +1858,9 @@ exit 0
     expect(calls[0]?.dataHome).toStartWith(tmpdir())
     expect(calls[1]?.dataHome).toStartWith(tmpdir())
     expect(calls[1]?.dataHome).toBe(calls[0]?.dataHome)
+    expect(calls[0]?.cacheHome).toStartWith(tmpdir())
+    expect(calls[1]?.cacheHome).toStartWith(tmpdir())
+    expect(calls[1]?.cacheHome).not.toBe(calls[0]?.cacheHome)
     expect(calls[0]?.tempHome).toStartWith(tmpdir())
     expect(calls[1]?.tempHome).toStartWith(tmpdir())
     expect(calls[1]?.tempHome).not.toBe(calls[0]?.tempHome)
