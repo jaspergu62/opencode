@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
-import { basename, join, resolve } from "node:path"
+import { basename, join, relative, resolve, sep } from "node:path"
 
 import { loadPactHarness, writeJsonFile } from "./pact-core"
 import {
@@ -269,12 +269,31 @@ ${input.failureBundle}
 
 function compactTrajectoryEvidence(artifactsDir: string | undefined): string {
   if (!artifactsDir || !existsSync(artifactsDir)) return ""
-  const names = new Set(["pact-driver.log", "state.json", "round-01-review.md", "round-02-review.md", "round-03-review.md", "round-01-summary.md", "round-02-summary.md", "round-03-summary.md"])
-  return findNamedFiles(artifactsDir, names)
-    .slice(-12)
-    .map((path) => `--- ${basename(path)} ---\n${readFileSync(path, "utf-8").slice(-4000)}`)
-    .join("\n")
-    .slice(-8000)
+  const files = findNamedFiles(artifactsDir)
+  const pactFiles = files.filter((path) => {
+    const name = basename(path)
+    return (
+      name === "pact-driver.log" ||
+      name === "state.json" ||
+      name === "finalize-summary.md" ||
+      name === "complete-state.md" ||
+      /^round-\d+-(?:review|summary|review-decision)\.(?:md|json)$/.test(name)
+    )
+  })
+  const verifierFiles = files.filter((path) => {
+    const name = basename(path)
+    return (
+      path.includes(`${sep}verifier${sep}`) &&
+      ["output.json", "reward.txt", "run-script-stdout.txt", "run-script-stderr.txt", "test-stdout.txt", "test-stderr.txt"].includes(name)
+    ) || name === "result.json"
+  })
+  const render = (paths: string[], byteBudget: number) =>
+    paths
+      .slice(-10)
+      .map((path) => `--- ${relative(artifactsDir, path)} ---\n${readFileSync(path, "utf-8").slice(-3000)}`)
+      .join("\n")
+      .slice(-byteBudget)
+  return [render(pactFiles, 7000), render(verifierFiles, 7000)].filter(Boolean).join("\n")
 }
 
 function harnessSnapshot(harnessDir: string): string {

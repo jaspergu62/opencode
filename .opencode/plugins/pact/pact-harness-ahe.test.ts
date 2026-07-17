@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { runAheHarnessEvolution, strictBestDecision } from "./pact-harness-ahe"
+import { buildFailureBundle, runAheHarnessEvolution, strictBestDecision } from "./pact-harness-ahe"
 import type { HarnessVariantResults } from "./pact-harness-evolve"
 
 function tempDir(prefix: string): string {
@@ -91,5 +91,33 @@ describe("PACT AHE sequential evolution", () => {
       ],
     }
     expect(strictBestDecision(baseline, baseline, candidate)).toMatchObject({ accept: false })
+  })
+
+  test("feeds both PACT decisions and Harbor hidden failures into the next improve phase", () => {
+    const root = tempDir("pact-ahe-failure-bundle-")
+    const loopDir = join(root, "agent", "pact", "loops", "trial")
+    const verifierDir = join(root, "verifier")
+    mkdirSync(loopDir, { recursive: true })
+    mkdirSync(verifierDir, { recursive: true })
+    writeFileSync(join(loopDir, "round-03-review.md"), "reviewer believed the patch was complete")
+    writeFileSync(join(verifierDir, "test-stdout.txt"), "HIDDEN_FAILURE_SIGNATURE")
+    writeFileSync(join(verifierDir, "reward.txt"), "0")
+    const run: HarnessVariantResults = {
+      harness_id: "candidate",
+      harness_dir: "/tmp/candidate",
+      case_results: [
+        {
+          case_id: "case-a",
+          status: "fail",
+          resolved: false,
+          artifacts_dir: root,
+        },
+      ],
+    }
+
+    const bundle = buildFailureBundle(run, [run])
+    expect(bundle).toContain("reviewer believed the patch was complete")
+    expect(bundle).toContain("HIDDEN_FAILURE_SIGNATURE")
+    expect(bundle).toContain("verifier/test-stdout.txt")
   })
 })
