@@ -275,7 +275,7 @@ function generateCodexVariant(input: AheVariantGeneratorInput, codexCommand: str
   return input.variantDir
 }
 
-function renderCodexPrompt(input: AheVariantGeneratorInput): string {
+export function renderCodexPrompt(input: AheVariantGeneratorInput): string {
   return `You are the improve phase of an AHE evaluate -> analyze -> improve -> select loop.
 Generate ${input.variantId} as a generic PACT workflow/schema overlay.
 
@@ -287,6 +287,8 @@ Allowed templates: planner, initial_worker, continuation_worker, review, review_
 Each template should preserve the default prompt and may use the goal tracker schema placeholder.
 change_manifest.json must use pact-harness-change/v1 and state predicted fixes, risks, changed files, and rationale.
 Never include instance IDs, repository names, task-specific paths, gold patches, solution content, or hidden test names in executable harness files.
+
+The overlay must remain compatible with the PACT runtime parser. A terminal review uses the exact heading \`### Status Delta\`, followed by one fenced JSON object with \`role: "reviewer_confirmed"\`. AC statuses are exactly \`met\`, \`partial\`, \`not_met\`, \`deferred\`, or \`blocked\`; task statuses are exactly \`complete\`, \`partial\`, \`pending\`, \`deferred\`, or \`blocked\`. Do not redefine these vocabularies. \`PACT_COMPLETE\` is valid only as the final non-empty line.
 
 Current harness:
 ${harnessSnapshot(input.currentBest.harness_dir)}

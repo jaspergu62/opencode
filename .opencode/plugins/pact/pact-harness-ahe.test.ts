@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { buildFailureBundle, runAheHarnessEvolution, strictBestDecision } from "./pact-harness-ahe"
+import { buildFailureBundle, renderCodexPrompt, runAheHarnessEvolution, strictBestDecision } from "./pact-harness-ahe"
 import type { HarnessVariantResults } from "./pact-harness-evolve"
 
 function tempDir(prefix: string): string {
@@ -122,5 +122,31 @@ describe("PACT AHE sequential evolution", () => {
     expect(bundle).toContain("HIDDEN_FAILURE_SIGNATURE")
     expect(bundle).toContain("verifier/test-stdout.txt")
     expect(bundle).toContain("Predicted fixes:\n- case-b")
+  })
+
+  test("tells Codex variants to use the exact PACT review parser vocabulary", () => {
+    const root = tempDir("pact-ahe-codex-prompt-")
+    const harnessDir = join(root, "harness")
+    writeHarness(harnessDir, "baseline")
+    const baseline: HarnessVariantResults = {
+      harness_id: "baseline",
+      harness_dir: harnessDir,
+      case_results: [],
+    }
+    const prompt = renderCodexPrompt({
+      iteration: 1,
+      variantId: "swepro-ahe-v1",
+      variantDir: join(root, "variant"),
+      currentBest: baseline,
+      baseline,
+      history: [baseline],
+      failureBundle: "no failures yet",
+      forbiddenTerms: [],
+      outputDir: root,
+    })
+
+    expect(prompt).toContain("exact heading `### Status Delta`")
+    expect(prompt).toContain("AC statuses are exactly `met`, `partial`, `not_met`, `deferred`, or `blocked`")
+    expect(prompt).toContain("`PACT_COMPLETE` is valid only as the final non-empty line")
   })
 })
