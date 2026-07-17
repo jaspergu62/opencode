@@ -145,8 +145,13 @@ describe("PACT AHE sequential evolution", () => {
       outputDir: root,
     })
 
-    expect(prompt).toContain("exact heading `### Status Delta`")
+    expect(prompt).toContain("exact headings `### Behavioral Contract Audit`")
     expect(prompt).toContain("AC statuses are exactly `met`, `partial`, `not_met`, `deferred`, or `blocked`")
+    expect(prompt).toContain("`### Behavioral Contract Audit`")
+    expect(prompt).toContain("`### Base-Equivalence Proof Audit`")
+    expect(prompt).toContain("`### Complete Decision Evidence`")
+    expect(prompt).toContain("spell out every `BO-*` ID individually")
+    expect(prompt).toContain("compressed ranges such as `BO-010..BO-017`")
     expect(prompt).toContain("`PACT_COMPLETE` is valid only as the final non-empty line")
   })
 })
