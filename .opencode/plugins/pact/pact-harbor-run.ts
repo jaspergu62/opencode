@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs"
+import { execFileSync, spawnSync } from "node:child_process"
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs"
 import { argv, cwd, exit } from "node:process"
-import { basename, join, resolve } from "node:path"
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 import { runPactDriver } from "./pact-run-driver"
 import { importInstructionSpec } from "./pact-spec-importer"
@@ -61,12 +62,69 @@ export function runPactHarborCase(input: PactHarborRunOptions) {
     resumeMode: "round0",
     harnessDir,
   })
+  const removedTestPatchFiles = result.loopDir
+    ? cleanupHarborTestPatchFiles({ projectRoot, loopDir: result.loopDir })
+    : []
 
   return {
     ...result,
+    harbor_removed_test_patch_files: removedTestPatchFiles,
     instruction_sha256_source: basename(instructionFile),
     instruction_bytes: Buffer.byteLength(readFileSync(instructionFile, "utf-8")),
   }
+}
+
+export function cleanupHarborTestPatchFiles(input: { projectRoot: string; loopDir: string }): string[] {
+  const artifacts = readdirSync(input.loopDir)
+    .map((name) => {
+      const match = /^round-(\d+)-patch-artifact\.json$/.exec(name)
+      return match ? { name, round: Number(match[1]) } : undefined
+    })
+    .filter((item): item is { name: string; round: number } => Boolean(item))
+    .sort((left, right) => right.round - left.round)
+  const latest = artifacts[0]
+  if (!latest) return []
+
+  const artifact = JSON.parse(readFileSync(join(input.loopDir, latest.name), "utf-8")) as {
+    test_patch?: { changed_files?: unknown }
+    excluded_test_patch_files?: unknown
+  }
+  const testPatchFiles = Array.isArray(artifact.test_patch?.changed_files)
+    ? artifact.test_patch.changed_files.filter((item): item is string => typeof item === "string")
+    : []
+  const excludedFiles = Array.isArray(artifact.excluded_test_patch_files)
+    ? artifact.excluded_test_patch_files
+        .map((item) => (item && typeof item === "object" && "path" in item ? item.path : undefined))
+        .filter((item): item is string => typeof item === "string")
+    : []
+  const paths = [...new Set([...testPatchFiles, ...excludedFiles])].sort()
+  const targets = paths.map((path) => ({ path, target: harborCleanupTarget(input.projectRoot, path) }))
+
+  for (const item of targets) {
+    const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "--", item.path], {
+      cwd: input.projectRoot,
+      stdio: "ignore",
+    }).status === 0
+    if (tracked) {
+      execFileSync("git", ["checkout", "--", item.path], { cwd: input.projectRoot, stdio: "ignore" })
+    } else {
+      rmSync(item.target, { force: true, recursive: true })
+    }
+  }
+  return paths
+}
+
+function harborCleanupTarget(projectRoot: string, artifactPath: string): string {
+  if (!artifactPath || isAbsolute(artifactPath)) {
+    throw new Error(`Unsafe Harbor test patch path: ${artifactPath || "(empty)"}`)
+  }
+  const root = resolve(projectRoot)
+  const target = resolve(root, artifactPath)
+  const fromRoot = relative(root, target)
+  if (!fromRoot || fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new Error(`Unsafe Harbor test patch path: ${artifactPath}`)
+  }
+  return target
 }
 
 export function pactHarborArgs(raw: string[]): PactHarborRunOptions {

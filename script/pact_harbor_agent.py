@@ -59,7 +59,7 @@ class PactOpenCodeAgent(BaseAgent):
         return "pact-opencode"
 
     def version(self) -> str:
-        return "swebench-pro-v2"
+        return "swebench-pro-v3"
 
     async def setup(self, environment: BaseEnvironment) -> None:
         if not self.runtime_dir.is_dir():

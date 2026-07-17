@@ -43,6 +43,7 @@ class PactOpenCodeAgentTest(unittest.IsolatedAsyncioTestCase):
                 runtime_dir=str(runtime),
                 harness_dir=str(harness),
             )
+            self.assertEqual(agent.version(), "swebench-pro-v3")
             await agent.setup(environment)
             await agent.run("Fix the requested behavior.", environment, AgentContext())
 
