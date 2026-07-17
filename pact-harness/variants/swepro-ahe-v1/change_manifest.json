@@ -1,0 +1,32 @@
+{
+  "schema": "pact-harness-change/v1",
+  "id": "swepro-ahe-v1",
+  "base": "pact-current",
+  "predicted_fixes": [
+    "Require a complete reviewer-confirmed status snapshot on every review and finalize pass, including no-change passes, so a complete decision immediately produces a terminal transition instead of consuming more rounds.",
+    "Define canonical status enums and an append-only evidence ledger so substantively proven obligations cannot remain unresolved because statuses were omitted, malformed, or only present in an earlier round.",
+    "Add risk-selected oracle families and an assumption-debt ledger so unsupported exact values, integration wiring, public API shape, negative cases, lifecycle behavior, and compatibility claims remain blocking until independently tested.",
+    "Bound worker and reviewer evidence budgets, prioritize authoritative artifacts and high-risk claims, reuse admitted evidence by stable ID, and reserve output budget for a parseable gate record.",
+    "Require a minimal round contract for implementation, evidence-only, review-phase, and finalize modes, including an explicit no-mutation declaration for checkpoint rounds.",
+    "Track an evidence-state fingerprint and allow at most one no-source-change evidence-closure round per unchanged state, forcing either a terminal decision or a newly identified falsifiable gap."
+  ],
+  "risks": [
+    "Risk-selected oracles can add a continuation round when imported requirements leave an exact value or integration boundary ambiguous.",
+    "Overly small budgets could under-review a large patch; the planner may scale explicit limits when it records why the default is insufficient.",
+    "Evidence ledgers can become verbose; stable IDs and carry-forward rules are intended to prevent reprinting full proofs outside terminal snapshots.",
+    "Legacy consumers may ignore the added ledger fields; existing Status Delta and PACT_COMPLETE markers are retained for compatibility."
+  ],
+  "changed_files": [
+    "manifest.json",
+    "change_manifest.json",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md"
+  ],
+  "rationale": "The trajectories separate into two reusable failure classes: convergence failures, where a correct patch and complete reviewer decision do not become durable terminal state, and oracle failures, where locally persuasive evidence leaves an untested semantic assumption. The overlay therefore makes evidence and status stateful, budgets proof work, selects independent oracle families from risk, and makes finalization a machine-readable reconciliation gate rather than another open-ended review."
+}

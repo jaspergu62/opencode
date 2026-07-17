@@ -1,0 +1,15 @@
+{
+  "schema": "pact-harness/v1",
+  "id": "swepro-ahe-v1",
+  "description": "Generic evidence-led PACT overlay with durable status snapshots, bounded worker rounds, risk-selected reviewer oracles, assumption tracking, and a convergent finalize gate. Templates preserve the built-in prompts via {{defaultPrompt}}.",
+  "templates": {
+    "planner": "templates/planner.md",
+    "initial_worker": "templates/initial-worker.md",
+    "continuation_worker": "templates/continuation-worker.md",
+    "review": "templates/review.md",
+    "review_phase": "templates/review-phase.md",
+    "finalize": "templates/finalize.md"
+  },
+  "goal_tracker_schema": "goal-tracker-schema.md",
+  "spec_import_profile": "spec-import-profile.json"
+}

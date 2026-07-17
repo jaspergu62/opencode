@@ -1,0 +1,62 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "swepro-ahe-v1",
+  "optimization_surface": "workflow/schema",
+  "candidate_scope": [
+    "manifest.json",
+    "change_manifest.json",
+    "templates/*.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json"
+  ],
+  "protected_scope": [
+    "PACT runtime plugins",
+    "runner code",
+    "benchmark source",
+    "evaluation-owned tests and patches"
+  ],
+  "default_mini_suite_source": "caller-supplied",
+  "promotion_policy": "guarded",
+  "required_capabilities": [
+    "append_only_evidence_ledger",
+    "full_reviewer_status_snapshot",
+    "risk_selected_oracle_families",
+    "assumption_debt_gate",
+    "bounded_round_contract",
+    "no_change_convergence",
+    "artifact_reconciliation_finalize_gate"
+  ],
+  "evaluation_dimensions": [
+    "pass",
+    "resolved",
+    "stop_reason",
+    "round_count",
+    "verification_status",
+    "final_hidden_gate",
+    "timeout",
+    "patch_quality",
+    "terminal_snapshot_valid",
+    "oracle_family_coverage",
+    "open_high_impact_assumptions",
+    "reviewer_budget_exhaustion",
+    "repeated_no_change_rounds",
+    "round_contract_completeness"
+  ],
+  "selection_policy": {
+    "primary": [
+      "resolved",
+      "pass",
+      "final_hidden_gate"
+    ],
+    "guardrails": [
+      "no increase in malformed or missing terminal snapshots",
+      "no increase in reviewer timeout or invocation failure",
+      "no completion with open high-impact assumptions"
+    ],
+    "tie_breakers": [
+      "fewer repeated no-change rounds",
+      "lower reviewed-round count",
+      "smaller unrelated patch surface"
+    ]
+  }
+}
