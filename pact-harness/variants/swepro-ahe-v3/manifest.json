@@ -1,0 +1,15 @@
+{
+  "schema": "pact-harness/v1",
+  "id": "swepro-ahe-v3",
+  "description": "Generic PACT workflow/schema overlay emphasizing pristine-consumer replay, external test-overlay composability, exact consumer bindings, observable-boundary evidence, and bounded disconfirmation-first review. Templates preserve built-in prompts through {{defaultPrompt}}.",
+  "templates": {
+    "planner": "templates/planner.md",
+    "initial_worker": "templates/initial-worker.md",
+    "continuation_worker": "templates/continuation-worker.md",
+    "review": "templates/review.md",
+    "review_phase": "templates/review-phase.md",
+    "finalize": "templates/finalize.md"
+  },
+  "goal_tracker_schema": "goal-tracker-schema.md",
+  "spec_import_profile": "spec-import-profile.json"
+}

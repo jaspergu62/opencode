@@ -1,0 +1,34 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "swepro-ahe-v3",
+  "optimization_surface": "workflow/schema",
+  "candidate_scope": [
+    "manifest.json",
+    "change_manifest.json",
+    "templates/*.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json"
+  ],
+  "protected_scope": [
+    "PACT runtime plugins",
+    "runner code",
+    "benchmark source",
+    "authoritative verifier"
+  ],
+  "promotion_policy": "guarded",
+  "evaluation_dimensions": [
+    "pass",
+    "resolved",
+    "stop_reason",
+    "round_count",
+    "reviewer_parse_status",
+    "authoritative_verification_status",
+    "pristine_consumer_replay",
+    "external_overlay_composability",
+    "consumer_contract_coverage",
+    "observable_boundary_coverage",
+    "final_external_gate",
+    "timeout",
+    "patch_quality"
+  ]
+}

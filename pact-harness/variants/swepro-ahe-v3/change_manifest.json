@@ -1,0 +1,36 @@
+{
+  "schema": "pact-harness-change/v1",
+  "id": "swepro-ahe-v3",
+  "base": "swepro-ahe-v2",
+  "predicted_fixes": [
+    "Quarantine worker-authored test changes from completion evidence and require a pristine-consumer replay of the production patch with tracked tests restored and added worker tests absent. This prevents locally rewritten tests from masking regressions and avoids declaration, fixture, or helper collisions when an external test overlay is applied.",
+    "Add an exact consumer-binding ledger for every introduced, removed, renamed, rebound, or signature-changed symbol. Executable fixtures must use the normative owner, receiver, import path, spelling, field name, signature, and return shape instead of proving API shape through source inspection alone.",
+    "Make removals compatibility-sensitive. Absence searches cannot close a removal by themselves; affected consumers must compile, and a compatibility adapter is preferred unless normative text explicitly requires the old contract to be unavailable.",
+    "Require framework-mediated boundary oracles for serialization, parsing, middleware, rendering, configuration, and error propagation changes. Direct helper probes cannot independently close behavior that consumers observe through a framework call chain.",
+    "Track logs, warnings, notifications, exception identity, sentinels, and partial output as observable side effects. Newly emitted diagnostics must be verified against pristine consumers rather than treated as harmless implementation detail.",
+    "Make failures on the current fingerprint dominant. Authoritative verification, pristine-consumer replay, consumer compilation, or selected boundary-oracle failures cannot be waived without an exact clean-base reproduction of the same command and failure signature.",
+    "Replace broad reviewer archaeology with a disconfirmation-first gate packet and explicit read, command, and output reserves. Reviewers prioritize authoritative artifacts, pristine replay, exact contract fixtures, and one falsifier per high-impact boundary before emitting the parser-critical snapshot.",
+    "Separate worker evidence requests from reviewer authority. Workers and finalizers may not emit `### Status Delta`, `role: reviewer_confirmed`, or `PACT_COMPLETE`; only a review emits the complete status snapshot and terminal marker."
+  ],
+  "risks": [
+    "Pristine-consumer replay may be expensive in repositories with broad affected test surfaces; the planner must select the narrowest consumer-complete command and allow at most two broad commands by default.",
+    "Quarantining persistent worker tests can reduce durable regression coverage. Such tests remain allowed when explicitly required, but they cannot be sole evidence and must pass overlay-collision checks.",
+    "Compatibility adapters can preserve a symbol that a normative requirement intends to remove. Explicit normative absence plus consumer evidence overrides the adapter preference.",
+    "Framework-mediated counterexamples may require temporary fixtures. Fixtures must remain outside the exported patch and use collision-resistant local identifiers.",
+    "Compact reviewer packets may omit useful narrative context for unusually broad changes. The planner may scale budgets once, with a recorded reason and an unchanged gate-output reserve.",
+    "External verification can remain unavailable. Completion then requires the stronger fallback matrix of pristine-consumer replay, exact contract fixtures, high-impact boundary oracles, and patch-composition checks."
+  ],
+  "changed_files": [
+    "manifest.json",
+    "change_manifest.json",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md"
+  ],
+  "rationale": "Earlier evidence ledgers improved status parsing but still admitted proofs produced by worker-modified tests, source-level probes, and unavailable-verification inference. Repeated failures arose when evaluator-supplied consumers replaced those tests, compiled against a different exact binding, observed a framework-level exception or diagnostic, or still depended on a removed symbol. This version makes patch composability and consumer-observed behavior first-class gates while reducing reviewer work to bounded falsification and a compact parser-safe terminal record."
+}
