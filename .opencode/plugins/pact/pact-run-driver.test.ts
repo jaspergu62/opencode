@@ -1541,6 +1541,53 @@ exec sleep 2
     )
   })
 
+  test("worker artifact completion guard does not require node on PATH", () => {
+    const project = tempGitProject()
+    const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-artifact-guard-runtime-bin-"))
+    tempDirs.push(binDir)
+    const fakeNode = join(binDir, "node")
+    const fakeOpencode = join(binDir, "fake-opencode")
+    writeFileSync(fakeNode, "#!/bin/sh\nexit 127\n", "utf-8")
+    writeFileSync(
+      fakeOpencode,
+      `#!/bin/sh
+loop_dir=$(find "$PWD/.pact/loops" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+printf '%s\n' '# Worker Summary' 'Focused verification completed.' > "$loop_dir/round-01-summary.md"
+printf '%s\n' 'worker change' >> "$PWD/src.txt"
+exec sleep 2
+`,
+      "utf-8",
+    )
+    chmodSync(fakeNode, 0o755)
+    chmodSync(fakeOpencode, 0o755)
+
+    const previousPath = process.env.PATH
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`
+    try {
+      const result = runPactDriver({
+        projectRoot: project,
+        planFile: join(project, "plan.md"),
+        model: "openrouter/z-ai/glm-5.2",
+        maxRounds: 1,
+        opencodeCommand: fakeOpencode,
+        workerCompletionGraceMs: 100,
+        maxInvocations: 1,
+        planner() {
+          return validPlannerOutput()
+        },
+        reviewer() {
+          return "### Decision Summary\nComplete.\n\nPACT_COMPLETE\n"
+        },
+      })
+
+      expect(result.status).toBe("max_invocations")
+      expect(result.loopDir).toBeDefined()
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+    }
+  })
+
   test("reviewer artifact completion guard releases a non-exiting OpenCode process", () => {
     const project = tempGitProject()
     const binDir = mkdtempSync(join(tmpdir(), "pact-opencode-reviewer-guard-bin-"))

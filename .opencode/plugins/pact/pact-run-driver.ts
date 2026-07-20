@@ -2408,7 +2408,7 @@ function spawnOpenCodeRun(input: {
     : [...input.args, input.prompt]
   const completionGraceMs = input.completionGraceMs ?? 0
   if (input.completionArtifact && Number.isFinite(completionGraceMs) && completionGraceMs > 0) {
-    return input.spawn("node", ["-e", OPENCODE_ARTIFACT_COMPLETION_GUARD], {
+    return input.spawn(process.execPath, ["-e", OPENCODE_ARTIFACT_COMPLETION_GUARD], {
       cwd: input.cwd,
       input: JSON.stringify({
         command: targetCommand,
