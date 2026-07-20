@@ -1,0 +1,107 @@
+{
+  "schema": "pact-spec-import-profile/v1",
+  "id": "swepro-ahe-v4",
+  "optimization_surface": "workflow/schema",
+  "candidate_scope": [
+    "manifest.json",
+    "change_manifest.json",
+    "templates/*.md",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json"
+  ],
+  "protected_scope": [
+    "PACT runtime implementation",
+    "runner implementation",
+    "task inputs",
+    "authoritative verifier inputs"
+  ],
+  "promotion_policy": "guarded",
+  "required_capabilities": [
+    "complete_reviewer_snapshot",
+    "diff_triggered_consumer_binding",
+    "diff_triggered_observable_compatibility",
+    "two_falsifier_round_limit",
+    "patch_scope_circuit_breaker",
+    "narrow_affected_verification",
+    "nearest_consumer_boundary_check",
+    "embedded_no_mutation_contract",
+    "reconciliation_only_finalize",
+    "parser_safe_terminal_audit"
+  ],
+  "trigger_policy": {
+    "always": [
+      "narrow_affected_check"
+    ],
+    "binding_diff": [
+      "exact_owner_receiver_import_or_integration_probe",
+      "nearest_existing_consumer_check"
+    ],
+    "observable_diff": [
+      "observable_compatibility_tuple"
+    ],
+    "framework_diff": [
+      "nearest_existing_consumer_check"
+    ],
+    "local_diff_exemptions": [
+      "universal_oracle_matrix",
+      "unconditional_exact_binding_probe",
+      "unconditional_pristine_replay",
+      "exhaustive_suite_gate"
+    ]
+  },
+  "review_policy": {
+    "max_high_impact_falsifiers_per_round": 2,
+    "authoritative_current_fingerprint_failure_is_dominant": true,
+    "stable_evidence_carry_forward": true,
+    "complete_snapshot_every_review": true,
+    "durable_fields": [
+      "ac",
+      "tasks",
+      "approved",
+      "rejected"
+    ]
+  },
+  "patch_scope_policy": {
+    "expansion_requires_failing_observation": true,
+    "expansion_requires_predicted_result": true,
+    "fallback": "return_to_last_coherent_patch"
+  },
+  "process_artifact_policy": {
+    "embedded_no_mutation_contract_allowed": true,
+    "process_only_gap_cannot_force_continuation": true,
+    "finalize_is_reconciliation_only": true,
+    "finalize_cannot_reopen_evidence": true,
+    "finalize_cannot_request_source_changes": true
+  },
+  "status_vocabularies": {
+    "ac": [
+      "met",
+      "partial",
+      "not_met",
+      "deferred",
+      "blocked"
+    ],
+    "tasks": [
+      "complete",
+      "partial",
+      "pending",
+      "deferred",
+      "blocked"
+    ]
+  },
+  "evaluation_dimensions": [
+    "pass",
+    "resolved",
+    "stop_reason",
+    "round_count",
+    "reviewer_parse_status",
+    "authoritative_verification_status",
+    "trigger_classification_accuracy",
+    "exact_consumer_binding_coverage",
+    "observable_compatibility_coverage",
+    "patch_scope_growth",
+    "nearest_consumer_result",
+    "timeout",
+    "patch_quality"
+  ]
+}

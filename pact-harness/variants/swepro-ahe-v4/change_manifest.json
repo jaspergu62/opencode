@@ -1,0 +1,61 @@
+{
+  "schema": "pact-harness-change/v1",
+  "id": "swepro-ahe-v4",
+  "variant_id": "swepro-ahe-v4",
+  "variant": "swepro-ahe-v4",
+  "base": "swepro-ahe-v3",
+  "optimization_surface": "workflow/schema",
+  "predicted_fixes": [
+    "ansible-1c06c46",
+    "flipt-2ce8a03",
+    "openlibrary-5de7de1"
+  ],
+  "risk_cases": [
+    "element-web-9bf7796",
+    "protonmail-webclients-5e815cf",
+    "qutebrowser-8d05f02"
+  ],
+  "predicted_fix_claims": [
+    "Restore concise objective-first execution while retaining a complete reviewer-confirmed snapshot on every review.",
+    "Trigger exact owner, receiver, import-path, registration, route, registry, or framework-entry probes only when the production diff changes a public or integration binding.",
+    "Treat newly added or changed logs, warnings, notifications, exception identity, sentinel values, fallback values, and partial output as compatibility changes, with observation required only when the diff introduces that risk.",
+    "Limit each round to at most two high-impact falsifiers selected from the current diff and unresolved requirements instead of applying a universal oracle matrix.",
+    "Add a patch-scope circuit breaker: entering another subsystem or materially growing the patch requires a concrete current-fingerprint failure, a causal hypothesis, and a predicted result; otherwise return to the last coherent patch.",
+    "Require one narrow affected check for a production patch and add the nearest existing consumer check only when a public or framework boundary is touched.",
+    "Allow no-mutation review and finalize contracts to live in existing summaries or gate records, and make finalize a reconciliation-only pass that cannot reopen evidence or request source changes.",
+    "Preserve parser-safe terminal audits with individually enumerated behavioral obligations and durable ac, tasks, approved, and rejected fields."
+  ],
+  "risks": [
+    "A binding or observable change hidden behind generated or indirect code may be misclassified; the reviewer therefore audits the final diff trigger classification.",
+    "The nearest consumer check may not cover a distant integration consumer, but exhaustive suites are intentionally not imposed as a workflow gate.",
+    "The two-falsifier limit can require another round for genuinely independent risks in a broad change.",
+    "The scope circuit breaker can reject useful exploration unless its failing observation and predicted result are recorded before expansion.",
+    "Embedded no-mutation contracts reduce standalone artifact uniformity, so the durable reviewer snapshot and final fingerprint remain mandatory.",
+    "An exact consumer binding may be undiscoverable; the workflow must report the resulting gap rather than inventing an owner or call form."
+  ],
+  "changed_harness_files": [
+    "manifest.json",
+    "change_manifest.json",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md"
+  ],
+  "changed_files": [
+    "manifest.json",
+    "change_manifest.json",
+    "goal-tracker-schema.md",
+    "spec-import-profile.json",
+    "templates/planner.md",
+    "templates/initial-worker.md",
+    "templates/continuation-worker.md",
+    "templates/review.md",
+    "templates/review-phase.md",
+    "templates/finalize.md"
+  ],
+  "rationale": "Evolution evidence favored the baseline's compact execution and v1's durable evidence state, while showing that broad v2/v3 oracle matrices consumed attention and regressed coherent patches. The reusable misses were narrower: proving a symbol at the wrong consumer binding, treating a new diagnostic or altered output as harmless, and expanding a patch without a newly falsified hypothesis. V4 therefore activates exact compatibility probes from the actual diff, caps falsification work, preserves a nearby consumer check for changed boundaries, and rolls speculative expansion back to the last coherent patch."
+}
